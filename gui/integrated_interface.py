@@ -5,7 +5,8 @@ Integrated GUI that connects to all backend services
 - Integrates with ML models
 - Connects to monitoring services
 """
-
+# Import with alias so you don't need to change the rest of the code
+from pipeline.generator import ODEDatasetGenerator as ODEGenerator
 import streamlit as st
 import requests
 import json
