@@ -1,15 +1,15 @@
-sservices:
+services:
   - type: web
     name: ode-api
-    runtime: python
-    buildCommand: "pip install -r requirements-api.txt"
-    startCommand: "python scripts/production_server.py"
+    runtime: docker
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: API_KEY
         value: a820f6deadb865716690b4abb4a46b27
-      - key: PYTHON_VERSION
-        value: 3.9.12
-        
+      - key: PORT
+        value: 8000
+        value: 
+              
   - type: web
     name: ode-gui
     env: python
