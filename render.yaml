@@ -1,12 +1,14 @@
-services:
+sservices:
   - type: web
     name: ode-api
-    env: python
-    buildCommand: pip install -r requirements-api.txt
-    startCommand: python scripts/production_server.py
+    runtime: python
+    buildCommand: "pip install -r requirements-api.txt"
+    startCommand: "python scripts/production_server.py"
     envVars:
       - key: API_KEY
-        generateValue: true
+        value: a820f6deadb865716690b4abb4a46b27
+      - key: PYTHON_VERSION
+        value: 3.9.12
         
   - type: web
     name: ode-gui
