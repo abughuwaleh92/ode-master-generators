@@ -41,10 +41,18 @@ try:
 except:
     st.sidebar.warning("⚠️ API Offline - Limited Functionality")
 
-# Configuration
-API_BASE_URL = "http://localhost:8000/api/v1"
-API_KEY = "your-secret-key-1"  # In production, use environment variable
-MONITORING_URL = "http://localhost:8050"
+import os
+import streamlit as st
+
+# Configuration - Use Streamlit secrets if available, otherwise environment/defaults
+if hasattr(st, 'secrets') and 'API_BASE_URL' in st.secrets:
+    API_BASE_URL = st.secrets['API_BASE_URL']
+    API_KEY = st.secrets['API_KEY']
+else:
+    API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000/api/v1')
+    API_KEY = os.getenv('API_KEY', 'your-secret-key-1')
+
+MONITORING_URL = os.getenv('MONITORING_URL', 'http://localhost:8050')
 
 class IntegratedODEInterface:
     def __init__(self):
