@@ -5,7 +5,8 @@ import streamlit as st
 import sys
 import os
 from pathlib import Path
-
+# Import with alias so you don't need to change the rest of the code
+from pipeline.generator import ODEDatasetGenerator as ODEGenerator
 # Page config
 st.set_page_config(
     page_title="ODE Master Generator",
