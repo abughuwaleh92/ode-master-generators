@@ -23,7 +23,32 @@ from pathlib import Path
 import redis
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
 import time
+import os
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
+from fastapi.security import APIKeyHeader
+from fastapi.middleware.cors import CORSMiddleware
 
+# Get API key from environment
+API_KEY = os.getenv('API_KEY', 'default-key-change-this')
+
+# Update CORS to allow Streamlit
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://*.streamlit.app",
+        "https://*.streamlit.io",
+        "http://localhost:8501"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Update the server to use PORT from environment
+if name == "__main__":
+    import uvicorn
+    port = int(os.getenv('PORT', 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
 # Initialize FastAPI app
 app = FastAPI(
     title="ODE Generation API",
