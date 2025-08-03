@@ -17,6 +17,29 @@ import asyncio
 import aiohttp
 from pathlib import Path
 import time
+import os
+import streamlit as st
+import requests
+import json
+
+# Get configuration from Streamlit secrets or environment
+if 'API_BASE_URL' in st.secrets:
+    API_BASE_URL = st.secrets['API_BASE_URL']
+    API_KEY = st.secrets['API_KEY']
+else:
+    API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000/api/v1')
+    API_KEY = os.getenv('API_KEY', 'test-key')
+
+# Show connection status
+st.sidebar.markdown("### Connection Status")
+try:
+    response = requests.get(f"{API_BASE_URL.replace('/api/v1', '/health')}", timeout=2)
+    if response.status_code == 200:
+        st.sidebar.success("✅ Connected to API")
+    else:
+        st.sidebar.error("❌ API Connection Failed")
+except:
+    st.sidebar.warning("⚠️ API Offline - Limited Functionality")
 
 # Configuration
 API_BASE_URL = "http://localhost:8000/api/v1"
