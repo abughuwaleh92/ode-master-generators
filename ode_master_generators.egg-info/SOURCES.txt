@@ -1,0 +1,9 @@
+README.md
+setup.py
+ode_master_generators.egg-info/PKG-INFO
+ode_master_generators.egg-info/SOURCES.txt
+ode_master_generators.egg-info/dependency_links.txt
+ode_master_generators.egg-info/entry_points.txt
+ode_master_generators.egg-info/requires.txt
+ode_master_generators.egg-info/top_level.txt
+tests/test_generators.py

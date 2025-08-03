@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ode-api
+    env: python
+    buildCommand: pip install -r requirements-api.txt
+    startCommand: python scripts/production_server.py
+    envVars:
+      - key: API_KEY
+        generateValue: true
+        
+  - type: web
+    name: ode-gui
+    env: python
+    buildCommand: pip install -r requirements-gui.txt
+    startCommand: streamlit run gui/integrated_interface.py --server.port=$PORT --server.address=0.0.0.0

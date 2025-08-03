@@ -1,0 +1,555 @@
+{% extends "base.html" %}
+
+{% block title %}Generate ODEs - ODE Master Generators{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-12">
+        <h2 class="mb-4">
+            <i class="fas fa-cogs"></i> Generate ODEs
+        </h2>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Configuration Form -->
+    <div class="col-lg-6">
+        <div class="card shadow-sm">
+            <div class="card-header">
+                <h5 class="mb-0">Configuration</h5>
+            </div>
+            <div class="card-body">
+                <form id="generationForm">
+                    <!-- Basic Settings -->
+                    <h6 class="text-primary mb-3">Basic Settings</h6>
+                    
+                    <div class="mb-3">
+                        <label for="samplesPerCombo" class="form-label">
+                            Samples per Combination
+                            <i class="fas fa-question-circle text-muted" 
+                               data-bs-toggle="tooltip" 
+                               title="Number of ODEs to generate for each generator-function combination"></i>
+                        </label>
+                        <input type="number" 
+                               class="form-control" 
+                               id="samplesPerCombo" 
+                               value="5" 
+                               min="1" 
+                               max="100">
+                    </div>
+                    
+                    <!-- Generator Selection -->
+                    <h6 class="text-primary mb-3">Generators</h6>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Linear Generators</label>
+                        <div class="generator-checkboxes">
+                            {% for gen in generators.linear %}
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" 
+                                       type="checkbox" 
+                                       id="gen_{{ gen }}" 
+                                       value="{{ gen }}" 
+                                       checked>
+                                <label class="form-check-label" for="gen_{{ gen }}">
+                                    {{ gen }}
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Non-Linear Generators</label>
+                        <div class="generator-checkboxes">
+                            {% for gen in generators.nonlinear %}
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" 
+                                       type="checkbox" 
+                                       id="gen_{{ gen }}" 
+                                       value="{{ gen }}" 
+                                       checked>
+                                <label class="form-check-label" for="gen_{{ gen }}">
+                                    {{ gen }}
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <!-- Function Selection -->
+                    <h6 class="text-primary mb-3">Functions</h6>
+                    
+                    <div class="mb-3">
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" 
+                                   type="checkbox" 
+                                   id="selectAllFunctions" 
+                                   checked>
+                            <label class="form-check-label" for="selectAllFunctions">
+                                Select All Functions
+                            </label>
+                        </div>
+                        
+                        <div class="function-grid">
+                            {% for func in functions %}
+                            <div class="form-check">
+                                <input class="form-check-input function-checkbox" 
+                                       type="checkbox" 
+                                       id="func_{{ func }}" 
+                                       value="{{ func }}" 
+                                       checked>
+                                <label class="form-check-label" for="func_{{ func }}">
+                                    {{ func }}
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <!-- Parameter Ranges -->
+                    <h6 class="text-primary mb-3">Parameter Ranges</h6>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">α values</label>
+                            <input type="text" 
+                                   class="form-control" 
+                                   id="alphaValues" 
+                                   value="0, 0.5, 1, 1.5, 2" 
+                                   placeholder="Comma-separated values">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">β values</label>
+                            <input type="text" 
+                                   class="form-control" 
+                                   id="betaValues" 
+                                   value="0.5, 1, 1.5, 2" 
+                                   placeholder="Comma-separated values">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">M values</label>
+                            <input type="text" 
+                                   class="form-control" 
+                                   id="mValues" 
+                                   value="0, 0.5, 1" 
+                                   placeholder="Comma-separated values">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">q values</label>
+                            <input type="text" 
+                                   class="form-control" 
+                                   id="qValues" 
+                                   value="2, 3" 
+                                   placeholder="Comma-separated values">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">v values</label>
+                            <input type="text" 
+                                   class="form-control" 
+                                   id="vValues" 
+                                   value="2, 3, 4" 
+                                   placeholder="Comma-separated values">
+                        </div>
+                    </div>
+                    
+                    <!-- Advanced Options -->
+                    <div class="accordion mb-3" id="advancedOptions">
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed" 
+                                        type="button" 
+                                        data-bs-toggle="collapse" 
+                                        data-bs-target="#advancedSettings">
+                                    Advanced Options
+                                </button>
+                            </h2>
+                            <div id="advancedSettings" 
+                                 class="accordion-collapse collapse" 
+                                 data-bs-parent="#advancedOptions">
+                                <div class="accordion-body">
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" 
+                                               type="checkbox" 
+                                               id="enableStreaming" 
+                                               checked>
+                                        <label class="form-check-label" for="enableStreaming">
+                                            Enable Streaming (recommended for large datasets)
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" 
+                                               type="checkbox" 
+                                               id="saveCheckpoints" 
+                                               checked>
+                                        <label class="form-check-label" for="saveCheckpoints">
+                                            Save Checkpoints
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">Verification Tolerance</label>
+                                        <input type="number" 
+                                               class="form-control" 
+                                               id="verificationTolerance" 
+                                               value="1e-8" 
+                                               step="1e-9">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="d-grid gap-2">
+                        <button type="submit" 
+                                class="btn btn-primary btn-lg" 
+                                id="generateBtn">
+                            <i class="fas fa-play"></i> Start Generation
+                        </button>
+                        <button type="button" 
+                                class="btn btn-outline-secondary" 
+                                id="resetBtn">
+                            <i class="fas fa-undo"></i> Reset Configuration
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Progress and Status -->
+    <div class="col-lg-6">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Generation Status</h5>
+            </div>
+            <div class="card-body">
+                <div id="statusSection" class="text-center py-5">
+                    <i class="fas fa-info-circle fa-3x text-muted mb-3"></i>
+                    <p class="text-muted">Configure settings and click "Start Generation" to begin</p>
+                </div>
+                
+                <div id="progressSection" style="display: none;">
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Overall Progress</span>
+                            <span id="progressPercent">0%</span>
+                        </div>
+                        <div class="progress" style="height: 25px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 id="progressBar" 
+                                 role="progressbar" 
+                                 style="width: 0%;">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row text-center mb-4">
+                        <div class="col-4">
+                            <div class="stat-card bg-primary text-white p-3 rounded">
+                                <h3 id="totalGenerated">0</h3>
+                                <p class="mb-0">Generated</p>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="stat-card bg-success text-white p-3 rounded">
+                                <h3 id="totalVerified">0</h3>
+                                <p class="mb-0">Verified</p>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="stat-card bg-info text-white p-3 rounded">
+                                <h3 id="generationRate">0</h3>
+                                <p class="mb-0">ODEs/s</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="logSection" class="log-viewer">
+                        <h6>Generation Log</h6>
+                        <div id="logContent" class="log-content">
+                            <!-- Log messages will appear here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="completionSection" style="display: none;">
+                    <div class="text-center py-5">
+                        <i class="fas fa-check-circle fa-4x text-success mb-3"></i>
+                        <h4>Generation Complete!</h4>
+                        <p class="mb-4">
+                            Successfully generated <span id="finalCount">0</span> ODEs
+                            with <span id="finalVerificationRate">0</span>% verification rate.
+                        </p>
+                        <a href="#" id="viewResultsBtn" class="btn btn-primary">
+                            <i class="fas fa-chart-bar"></i> View Results
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Estimation Card -->
+        <div class="card shadow-sm">
+            <div class="card-header">
+                <h5 class="mb-0">Estimation</h5>
+            </div>
+            <div class="card-body">
+                <p class="mb-2">
+                    <strong>Expected ODEs:</strong> 
+                    <span id="expectedODEs">0</span>
+                </p>
+                <p class="mb-2">
+                    <strong>Estimated Time:</strong> 
+                    <span id="estimatedTime">-</span>
+                </p>
+                <p class="mb-0">
+                    <strong>Estimated Size:</strong> 
+                    <span id="estimatedSize">-</span>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Initialize Socket.IO
+const socket = io();
+
+let currentSessionId = null;
+let startTime = null;
+
+// Form handling
+document.getElementById('generationForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    // Gather configuration
+    const config = gatherConfiguration();
+    
+    // Update UI
+    document.getElementById('statusSection').style.display = 'none';
+    document.getElementById('progressSection').style.display = 'block';
+    document.getElementById('completionSection').style.display = 'none';
+    document.getElementById('generateBtn').disabled = true;
+    
+    // Clear previous log
+    document.getElementById('logContent').innerHTML = '';
+    
+    // Start generation
+    startTime = new Date();
+    
+    try {
+        const response = await fetch('/api/generate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(config)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            currentSessionId = data.session_id;
+            addLogMessage('info', 'Generation started with session ID: ' + currentSessionId);
+        } else {
+            throw new Error(data.error || 'Failed to start generation');
+        }
+        
+    } catch (error) {
+        console.error('Error:', error);
+        addLogMessage('error', 'Failed to start generation: ' + error.message);
+        document.getElementById('generateBtn').disabled = false;
+    }
+});
+
+// Socket event handlers
+socket.on('connect', () => {
+    console.log('Connected to server');
+});
+
+socket.on('progress_update', (data) => {
+    if (data.session_id === currentSessionId) {
+        updateProgress(data);
+    }
+});
+
+socket.on('generation_complete', (data) => {
+    if (data.session_id === currentSessionId) {
+        handleCompletion(data);
+    }
+});
+
+socket.on('generation_error', (data) => {
+    if (data.session_id === currentSessionId) {
+        handleError(data);
+    }
+});
+
+socket.on('status_update', (data) => {
+    if (data.session_id === currentSessionId) {
+        addLogMessage('info', 'Status: ' + data.status);
+    }
+});
+
+// Helper functions
+function gatherConfiguration() {
+    // Get selected generators
+    const selectedGenerators = {
+        linear: [],
+        nonlinear: []
+    };
+    
+    document.querySelectorAll('input[type="checkbox"][id^="gen_"]:checked').forEach(cb => {
+        const genName = cb.value;
+        if (['L1', 'L2', 'L3', 'L4'].includes(genName)) {
+            selectedGenerators.linear.push(genName);
+        } else {
+            selectedGenerators.nonlinear.push(genName);
+        }
+    });
+    
+    // Get selected functions
+    const selectedFunctions = [];
+    document.querySelectorAll('.function-checkbox:checked').forEach(cb => {
+        selectedFunctions.push(cb.value);
+    });
+    
+    // Parse parameter values
+    const parseValues = (str) => str.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+    
+    return {
+        generation: {
+            samples_per_combo: parseInt(document.getElementById('samplesPerCombo').value),
+            selected_generators: selectedGenerators,
+            selected_functions: selectedFunctions,
+            parameter_ranges: {
+                alpha: parseValues(document.getElementById('alphaValues').value),
+                beta: parseValues(document.getElementById('betaValues').value),
+                M: parseValues(document.getElementById('mValues').value),
+                q: parseValues(document.getElementById('qValues').value),
+                v: parseValues(document.getElementById('vValues').value),
+                a: [2, 3, 4]  // Fixed for pantograph
+            }
+        },
+        performance: {
+            streaming_enabled: document.getElementById('enableStreaming').checked,
+            save_checkpoints: document.getElementById('saveCheckpoints').checked
+        },
+        verification: {
+            residual_tolerance: parseFloat(document.getElementById('verificationTolerance').value)
+        }
+    };
+}
+
+function updateProgress(data) {
+    const percent = Math.round((data.progress / data.total) * 100);
+    
+    document.getElementById('progressBar').style.width = percent + '%';
+    document.getElementById('progressPercent').textContent = percent + '%';
+    document.getElementById('totalGenerated').textContent = data.generated;
+    document.getElementById('totalVerified').textContent = data.verified;
+    
+    // Calculate generation rate
+    if (startTime) {
+        const elapsed = (new Date() - startTime) / 1000;
+        const rate = (data.generated / elapsed).toFixed(1);
+        document.getElementById('generationRate').textContent = rate;
+    }
+    
+    // Add progress log
+    if (data.progress % 50 === 0) {
+        addLogMessage('info', `Progress: ${data.progress}/${data.total} ODEs processed`);
+    }
+}
+
+function handleCompletion(data) {
+    document.getElementById('progressSection').style.display = 'none';
+    document.getElementById('completionSection').style.display = 'block';
+    document.getElementById('generateBtn').disabled = false;
+    
+    document.getElementById('finalCount').textContent = data.total_generated;
+    document.getElementById('finalVerificationRate').textContent = data.verification_rate.toFixed(1);
+    document.getElementById('viewResultsBtn').href = `/results/${currentSessionId}`;
+    
+    addLogMessage('success', 'Generation completed successfully!');
+}
+
+function handleError(data) {
+    addLogMessage('error', 'Generation failed: ' + data.error);
+    document.getElementById('generateBtn').disabled = false;
+}
+
+function addLogMessage(type, message) {
+    const logContent = document.getElementById('logContent');
+    const timestamp = new Date().toLocaleTimeString();
+    
+    const logEntry = document.createElement('div');
+    logEntry.className = `log-entry log-${type}`;
+    logEntry.innerHTML = `
+        <span class="log-timestamp">[${timestamp}]</span>
+        <span class="log-message">${message}</span>
+    `;
+    
+    logContent.appendChild(logEntry);
+    logContent.scrollTop = logContent.scrollHeight;
+}
+
+// UI interactions
+document.getElementById('selectAllFunctions').addEventListener('change', (e) => {
+    document.querySelectorAll('.function-checkbox').forEach(cb => {
+        cb.checked = e.target.checked;
+    });
+    updateEstimation();
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+    document.getElementById('generationForm').reset();
+    updateEstimation();
+});
+
+// Update estimation when configuration changes
+function updateEstimation() {
+    const config = gatherConfiguration();
+    
+    const numGenerators = 
+        config.generation.selected_generators.linear.length + 
+        config.generation.selected_generators.nonlinear.length;
+    
+    const numFunctions = config.generation.selected_functions.length;
+    const samplesPerCombo = config.generation.samples_per_combo;
+    
+    const expectedODEs = numGenerators * numFunctions * samplesPerCombo;
+    
+    document.getElementById('expectedODEs').textContent = expectedODEs.toLocaleString();
+    
+    // Estimate time (assuming ~1 ODE/second)
+    const estimatedSeconds = expectedODEs;
+    const estimatedMinutes = Math.ceil(estimatedSeconds / 60);
+    document.getElementById('estimatedTime').textContent = 
+        estimatedMinutes < 60 ? `~${estimatedMinutes} minutes` : `~${(estimatedMinutes/60).toFixed(1)} hours`;
+    
+    // Estimate size (assuming ~1KB per ODE)
+    const estimatedKB = expectedODEs;
+    const estimatedMB = (estimatedKB / 1024).toFixed(1);
+    document.getElementById('estimatedSize').textContent = 
+        estimatedKB < 1024 ? `~${estimatedKB} KB` : `~${estimatedMB} MB`;
+}
+
+// Initialize tooltips
+var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+    return new bootstrap.Tooltip(tooltipTriggerEl);
+});
+
+// Initial estimation
+updateEstimation();
+
+// Update estimation on any form change
+document.getElementById('generationForm').addEventListener('change', updateEstimation);
+</script>
+{% endblock %}

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Data files
+*.jsonl
+*.csv
+models/*.pth
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets
+.env
+config/secrets.yaml
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,33 @@
+generation:
+  samples_per_combo: 5
+  parameter_ranges:
+    alpha: [0, 0.5, 1, 1.5, 2]
+    beta: [0.5, 1, 1.5, 2]
+    M: [0, 0.5, 1]
+    q: [2, 3]
+    v: [2, 3, 4]
+    a: [2, 3, 4]
+
+verification:
+  numeric_test_points: [0.1, 0.3, 0.7, 1.0]
+  residual_tolerance: 1.0e-8
+  max_derivative_order: 5
+  verification_timeout: 30
+
+performance:
+  cache_size: 256
+  n_workers: null
+  streaming_enabled: true
+  batch_size: 100
+  enable_progress_bar: true
+
+output:
+  streaming_file: "ode_dataset.jsonl"
+  features_file: "ode_features.parquet"
+  report_file: "generation_report.json"
+  save_intermediate: true
+  checkpoint_interval: 500
+
+logging:
+  level: "INFO"
+  file: "ode_generation.log"

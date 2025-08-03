@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+
+{% block title %}Home - ODE Master Generators{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-12">
+        <!-- Hero Section -->
+        <div class="jumbotron bg-light p-5 rounded-3 mb-4">
+            <h1 class="display-4">
+                <i class="fas fa-infinity text-primary"></i> 
+                ODE Master Generators
+            </h1>
+            <p class="lead">
+                A revolutionary approach to construct and solve ordinary differential equations
+                using master theorems of integrals.
+            </p>
+            <hr class="my-4">
+            <p>
+                Generate infinite families of both linear and non-linear ODEs with known exact solutions.
+                Based on the groundbreaking research by Mohammad Abu-Ghuwaleh, Rania Saadeh, and Rasheed Saffaf.
+            </p>
+            <div class="mt-4">
+                <a class="btn btn-primary btn-lg me-2" href="/generate">
+                    <i class="fas fa-rocket"></i> Start Generating
+                </a>
+                <a class="btn btn-outline-secondary btn-lg" href="/analysis">
+                    <i class="fas fa-chart-line"></i> View Analysis
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Features -->
+    <div class="col-lg-4 mb-4">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body text-center">
+                <div class="feature-icon bg-primary text-white rounded-circle mb-3">
+                    <i class="fas fa-infinity fa-2x"></i>
+                </div>
+                <h4 class="card-title">Infinite Generators</h4>
+                <p class="card-text">
+                    Generate unlimited ODEs using master theorems, creating families of equations
+                    with guaranteed exact solutions.
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4 mb-4">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body text-center">
+                <div class="feature-icon bg-success text-white rounded-circle mb-3">
+                    <i class="fas fa-check-double fa-2x"></i>
+                </div>
+                <h4 class="card-title">Verified Solutions</h4>
+                <p class="card-text">
+                    All generated ODEs come with verified exact solutions using multiple
+                    verification methods for reliability.
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4 mb-4">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body text-center">
+                <div class="feature-icon bg-info text-white rounded-circle mb-3">
+                    <i class="fas fa-tachometer-alt fa-2x"></i>
+                </div>
+                <h4 class="card-title">High Performance</h4>
+                <p class="card-text">
+                    Optimized for speed with caching, parallel processing, and streaming
+                    capabilities for large-scale generation.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <!-- Supported Generators -->
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-cube"></i> Linear Generators
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-6">
+                        <h6>L1: Standard Form</h6>
+                        <p class="math-display">$$y''(x) + y(x) = \text{RHS}$$</p>
+                    </div>
+                    <div class="col-6">
+                        <h6>L2: First Derivative</h6>
+                        <p class="math-display">$$y''(x) + y'(x) = \text{RHS}$$</p>
+                    </div>
+                    <div class="col-6">
+                        <h6>L3: Mixed Form</h6>
+                        <p class="math-display">$$y(x) + y'(x) = \text{RHS}$$</p>
+                    </div>
+                    <div class="col-6">
+                        <h6>L4: Pantograph</h6>
+                        <p class="math-display">$$y''(x) + y(x/a) - y(x) = \text{RHS}$$</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-6 mb-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-cubes"></i> Non-Linear Generators
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-12 mb-2">
+                        <h6>N1: Power of Second Derivative</h6>
+                        <p class="math-display">$$(y''(x))^q + y(x) = \text{RHS}$$</p>
+                    </div>
+                    <div class="col-12 mb-2">
+                        <h6>N2: Mixed Powers</h6>
+                        <p class="math-display">$$(y''(x))^q + (y'(x))^v = \text{RHS}$$</p>
+                    </div>
+                    <div class="col-12">
+                        <h6>N3: Power of First Derivative</h6>
+                        <p class="math-display">$$y(x) + (y'(x))^v = \text{RHS}$$</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <!-- Statistics -->
+    <div class="col-lg-12">
+        <div class="card shadow-sm">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-chart-bar"></i> System Capabilities
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-3">
+                        <div class="stat-box">
+                            <h2 class="text-primary">22+</h2>
+                            <p>Analytic Functions</p>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-box">
+                            <h2 class="text-success">7</h2>
+                            <p>Generator Types</p>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-box">
+                            <h2 class="text-info">99%+</h2>
+                            <p>Verification Rate</p>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-box">
+                            <h2 class="text-warning">10k+</h2>
+                            <p>ODEs/Minute</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Animate statistics on scroll
+    $(document).ready(function() {
+        $('.stat-box h2').each(function() {
+            var $this = $(this);
+            var countTo = parseInt($this.text());
+            
+            $this.text('0');
+            
+            $(window).on('scroll', function() {
+                if ($this.offset().top < $(window).scrollTop() + $(window).height()) {
+                    $({ countNum: 0 }).animate({
+                        countNum: countTo
+                    }, {
+                        duration: 2000,
+                        easing: 'linear',
+                        step: function() {
+                            $this.text(Math.floor(this.countNum));
+                        },
+                        complete: function() {
+                            $this.text(this.countNum + '+');
+                        }
+                    });
+                    
+                    $(window).off('scroll');
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}

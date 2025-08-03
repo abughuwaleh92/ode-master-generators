@@ -1,0 +1,24 @@
+# Makefile for ODE Master Generator
+
+.PHONY: gui api all stop
+
+# Start GUI
+gui:
+ streamlit run gui/integrated_interface.py
+
+# Start API server
+api:
+ python scripts/production_server.py
+
+# Start all services
+all:
+ @echo "Starting all services..."
+ @python scripts/production_server.py &
+ @sleep 3
+ @streamlit run gui/integrated_interface.py
+
+# Stop all services
+stop:
+ @echo "Stopping services..."
+ @pkill -f "production_server.py" || true
+ @pkill -f "str

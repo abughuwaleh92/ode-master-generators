@@ -1,0 +1,175 @@
+{
+  "generation_info": {
+    "start_time": "2025-08-03 03:44:46.773283",
+    "end_time": "2025-08-03 03:44:49.726384",
+    "duration_seconds": 2.953101,
+    "total_generated": 5,
+    "total_failed": 0,
+    "seed": 42,
+    "config": {
+      "generation": {
+        "samples_per_combo": 1,
+        "parameter_ranges": {
+          "alpha": [
+            0,
+            0.5,
+            1,
+            1.5,
+            2
+          ],
+          "beta": [
+            0.5,
+            1,
+            1.5,
+            2
+          ],
+          "M": [
+            0,
+            0.5,
+            1
+          ],
+          "q": [
+            2,
+            3
+          ],
+          "v": [
+            2,
+            3,
+            4
+          ],
+          "a": [
+            2,
+            3,
+            4
+          ]
+        }
+      },
+      "verification": {
+        "numeric_test_points": [
+          0.1,
+          0.3,
+          0.7,
+          1.0
+        ],
+        "residual_tolerance": 1e-08,
+        "max_derivative_order": 5,
+        "verification_timeout": 30
+      },
+      "performance": {
+        "cache_size": 256,
+        "n_workers": null,
+        "streaming_enabled": true,
+        "batch_size": 100,
+        "enable_progress_bar": true
+      },
+      "output": {
+        "streaming_file": "ode_dataset.jsonl",
+        "features_file": "ode_features.parquet",
+        "report_file": "generation_report.json",
+        "save_intermediate": true,
+        "checkpoint_interval": 500
+      },
+      "logging": {
+        "level": "INFO",
+        "file": "ode_generation.log"
+      }
+    }
+  },
+  "dataset_statistics": {
+    "total_odes": 5,
+    "verified_odes": 5,
+    "linear_odes": 5,
+    "nonlinear_odes": 0,
+    "pantograph_odes": 0,
+    "complexity_mean": 127.0,
+    "complexity_std": 61.335144900782616,
+    "complexity_min": 59,
+    "complexity_max": 208,
+    "verification_rate": 1.0,
+    "verification_methods": {
+      "substitution": 5
+    },
+    "generator_stats": {
+      "linear_L1": {
+        "total": 5,
+        "verified": 5
+      }
+    },
+    "function_stats": {
+      "identity": {
+        "total": 1,
+        "verified": 1
+      },
+      "quadratic": {
+        "total": 1,
+        "verified": 1
+      },
+      "cubic": {
+        "total": 1,
+        "verified": 1
+      },
+      "quartic": {
+        "total": 1,
+        "verified": 1
+      },
+      "quintic": {
+        "total": 1,
+        "verified": 1
+      }
+    },
+    "total_generation_time": 2.4195284843444824,
+    "average_generation_time": 0.4839056968688965
+  },
+  "generator_performance": {
+    "linear_L1": {
+      "total": 5,
+      "successful": 5,
+      "verified": 5
+    }
+  },
+  "function_performance": {
+    "identity": {
+      "total": 1,
+      "verified": 1
+    },
+    "quadratic": {
+      "total": 1,
+      "verified": 1
+    },
+    "cubic": {
+      "total": 1,
+      "verified": 1
+    },
+    "quartic": {
+      "total": 1,
+      "verified": 1
+    },
+    "quintic": {
+      "total": 1,
+      "verified": 1
+    }
+  },
+  "verification_methods": {
+    "substitution": 5
+  },
+  "timing_analysis": {
+    "generation_times": {
+      "mean": 0.4839056968688965,
+      "std": 0.2125420201858516,
+      "min": 0.2702772617340088,
+      "max": 0.8407511711120605,
+      "percentiles": {
+        "25": 0.2932157516479492,
+        "50": 0.4198775291442871,
+        "75": 0.5954067707061768,
+        "95": 0.7916822910308837
+      }
+    }
+  },
+  "failed_generations": {
+    "total": 0,
+    "by_generator": {},
+    "by_function": {},
+    "sample_errors": []
+  }
+}
