@@ -64,7 +64,7 @@ class StandaloneODEInterface:
                  "🧠 AI Generation",
                  "📊 Analysis Dashboard",
                  "📁 Dataset Manager",
-                 "⚡️ Batch Processing",
+                 "⚡ Batch Processing",
                  "🔧 Settings"]
             )
             
@@ -75,7 +75,7 @@ class StandaloneODEInterface:
             st.info(f"Dataset Size: {len(st.session_state.current_dataset)}")
             
             st.markdown("---")
-            if st.button("🗑 Clear Session", type="secondary"):
+            if st.button("🗑️ Clear Session", type="secondary"):
                 st.session_state.generated_odes = []
                 st.session_state.current_dataset = []
                 st.experimental_rerun()
@@ -91,7 +91,7 @@ class StandaloneODEInterface:
             self.analysis_dashboard()
         elif page == "📁 Dataset Manager":
             self.dataset_manager()
-        elif page == "⚡️ Batch Processing":
+        elif page == "⚡ Batch Processing":
             self.batch_processing_page()
         elif page == "🔧 Settings":
             self.settings_page()
@@ -125,7 +125,7 @@ class StandaloneODEInterface:
         with col3:
             count = st.number_input(
                 "Number of ODEs",
-              min_value=1,
+                min_value=1,
                 max_value=100,
                 value=5,
                 help="How many ODEs to generate"
@@ -219,8 +219,7 @@ class StandaloneODEInterface:
                     
                     # Actions
                     if st.button(f"Add to Dataset", key=f"add_{i}"):
-                        st.session_state.current_dataset.
-                      append(ode)
+                        st.session_state.current_dataset.append(ode)
                         st.success("Added to dataset!")
     
     def ml_training_page(self):
@@ -427,7 +426,9 @@ class StandaloneODEInterface:
                 with col1:
                     if st.button("Clear Dataset", type="secondary"):
                         st.session_state.current_dataset = []
-                        st.success("Dataset cleared!")# Show first few entries
+                        st.success("Dataset cleared!")
+                
+                # Show first few entries
                 st.subheader("Preview (First 5 entries)")
                 for i, ode in enumerate(st.session_state.current_dataset[:5]):
                     st.write(f"{i+1}. {ode.get('ode_symbolic', 'N/A')}")
@@ -495,7 +496,7 @@ class StandaloneODEInterface:
     
     def batch_processing_page(self):
         """Batch Processing"""
-        st.title("⚡️ Batch Processing")
+        st.title("⚡ Batch Processing")
         
         st.subheader("Batch Generation")
         
@@ -518,13 +519,14 @@ class StandaloneODEInterface:
         
         samples_per_combo = st.number_input(
             "Samples per combination",
-            1, 100, 10,help=f"Will generate {len(generators) * len(functions) * 10} ODEs total"
+            1, 100, 10,
+            help=f"Will generate {len(generators) * len(functions) * 10} ODEs total"
         )
         
         total_odes = len(generators) * len(functions) * samples_per_combo
         st.info(f"Total ODEs to generate: {total_odes}")
         
-        if st.button("⚡️ Start Batch Generation", type="primary"):
+        if st.button("⚡ Start Batch Generation", type="primary"):
             if not MODULES_AVAILABLE:
                 st.error("ODE modules not available")
                 return
@@ -576,7 +578,7 @@ class StandaloneODEInterface:
             st.success("Settings saved! (In a real app, these would persist)")
 
 # Run the application
-if name == "__main__":
+if __name__ == "__main__":
     if MODULES_AVAILABLE:
         app = StandaloneODEInterface()
         app.run()
