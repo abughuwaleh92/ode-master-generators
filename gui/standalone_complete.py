@@ -11,7 +11,8 @@ from pathlib import Path
 import time
 from typing import List, Dict, Optional
 import io
-
+# Import with alias so you don't need to change the rest of the code
+from pipeline.generator import ODEDatasetGenerator as ODEGenerator
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
