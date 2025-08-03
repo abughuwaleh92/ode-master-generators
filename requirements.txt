@@ -45,3 +45,7 @@ colorama>=0.4.6
 # UI components
 plotly>=5.0.0
 dash>=2.0.0  # Optional for advanced dashboards
+streamlit
+aiohttp
+requests
+pydantic
