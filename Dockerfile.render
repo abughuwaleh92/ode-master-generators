@@ -1,0 +1,26 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install only what's needed
+RUN pip install --no-cache-dir \
+    fastapi \
+    uvicorn \
+    sympy \
+    numpy \
+    pandas
+
+# Copy only necessary files
+COPY scripts/production_server.py scripts/
+COPY core/ core/
+COPY generators/ generators/
+COPY pipeline/ pipeline/
+COPY utils/ utils/
+COPY verification/ verification/
+
+# Use Render's PORT
+ENV PORT=10000
+EXPOSE 10000
+
+# Run the app
+CMD uvicorn scripts.production_server:app --host 0.0.0.0 --port $PORT
