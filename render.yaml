@@ -1,17 +1,24 @@
 services:
   - type: web
     name: ode-api
-    runtime: docker
-    dockerfilePath: ./Dockerfile
+    env: python
+    pythonVersion: "3.9"
+    buildCommand: |
+      pip install --upgrade pip setuptools wheel
+      pip install -r requirements-api.txt
+    startCommand: python scripts/production_server.py
     envVars:
-      - key: API_KEY
-        value: a820f6deadb865716690b4abb4a46b27
-      - key: PORT
-        value: 8000
-        value: 
-              
+      - key: a820f6deadb865716690b4abb4a46b27
+        generateValue: true
+        
   - type: web
     name: ode-gui
     env: python
-    buildCommand: pip install -r requirements-gui.txt
+    pythonVersion: "3.9"
+    buildCommand: |
+      pip install --upgrade pip setuptools wheel
+      pip install -r requirements-gui.txt
     startCommand: streamlit run gui/integrated_interface.py --server.port=$PORT --server.address=0.0.0.0
+    envVars:
+      - key: API_KEY
+        sync: false
