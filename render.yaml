@@ -2,10 +2,12 @@ services:
   - type: web
     name: ode-api
     runtime: docker
-    dockerfilePath: ./Dockerfile.render
+    dockerfilePath: ./Dockerfile
     envVars:
-      - key: a820f6deadb865716690b4abb4a46b27
-        generateValue: true
+      - key: API_KEY
+        value: a820f6deadb865716690b4abb4a46b27
+      - key: PORT
+        value: 8000
         
   - type: web
     name: ode-gui
