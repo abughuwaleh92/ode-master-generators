@@ -8,3 +8,7 @@ pydantic==2.4.2
 python-multipart==0.0.6
 aiofiles==23.2.1
 prometheus-client==0.18.0
+streamlit
+aiohttp
+requests
+pydantic
