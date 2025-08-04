@@ -17,40 +17,48 @@ import aiohttp
 from pathlib import Path
 import time
 import os
-import streamlit as st
-import requests
-import json
 
-# Configuration - Use Streamlit secrets for production
-if 'API_BASE_URL' in st.secrets:
-    API_BASE_URL = st.secrets['API_BASE_URL']
-    API_KEY = st.secrets['API_KEY']
-else:
-    # Fallback for local development
-    API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000/api/v1')
-    API_KEY = os.getenv('API_KEY', 'your-test-key')
+# Page config
+st.set_page_config(
+    page_title="ODE Master Generator - Integrated System",
+    page_icon="🔬",
+    layout="wide"
+)
 
-# Show connection status
-st.sidebar.markdown("### Connection Status")
-try:
-    # Remove /api/v1 and add /health
-    health_url = API_BASE_URL.replace('/api/v1', '/health')
-    response = requests.get(health_url, timeout=5)
-    if response.status_code == 200:
-        st.sidebar.success("✅ Connected to API")
-    else:
-        st.sidebar.error("❌ API Connection Failed")
-except Exception as e:
-    st.sidebar.warning("⚠️ API Offline")
-    st.sidebar.text(f"URL: {API_BASE_URL}")
+# Configuration with better error handling
+def load_config():
+    """Load configuration from environment or secrets"""
+    config = {
+        'API_BASE_URL': None,
+        'API_KEY': None
+    }
+    
+    # 1. Try environment variables (Railway, Heroku, etc.)
+    config['API_BASE_URL'] = os.getenv('API_BASE_URL')
+    config['API_KEY'] = os.getenv('API_KEY')
+    
+    # 2. Try Streamlit secrets if env vars not found
+    if not config['API_BASE_URL']:
+        try:
+            # This will only work on Streamlit Cloud
+            config['API_BASE_URL'] = st.secrets.get('API_BASE_URL')
+            config['API_KEY'] = st.secrets.get('API_KEY')
+        except:
+            pass
+    
+    # 3. Use defaults if nothing found
+    if not config['API_BASE_URL']:
+        config['API_BASE_URL'] = 'http://localhost:8000/api/v1'
+        config['API_KEY'] = 'test-key'
+        st.warning("⚠️ Using default configuration. Set API_BASE_URL and API_KEY in environment variables.")
+    
+    return config
 
-# Get configuration from Streamlit secrets or environment
-if 'API_BASE_URL' in st.secrets:
-    API_BASE_URL = st.secrets['API_BASE_URL']
-    API_KEY = st.secrets['API_KEY']
-else:
-    API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000/api/v1')
-    API_KEY = os.getenv('API_KEY', 'test-key')
+# Load configuration
+config = load_config()
+API_BASE_URL = config['API_BASE_URL']
+API_KEY = config['API_KEY']
+MONITORING_URL = os.getenv('MONITORING_URL', 'http://localhost:8050')
 
 # Show connection status
 st.sidebar.markdown("### Connection Status")
