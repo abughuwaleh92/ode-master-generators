@@ -81,7 +81,7 @@ class IntegratedODEInterface:
         except requests.exceptions.RequestException as e:
             st.sidebar.warning("⚠️ API Offline - Limited Functionality")
            if st.sidebar.button("🔄 Retry Connection"):
-    st.rerun()
+               st.rerun()
             return False
         
     def run(self):
@@ -235,8 +235,8 @@ class IntegratedODEInterface:
                 st.latex(f"y''(x) + {ode_str} = ?")
                 
                 if st.button("Clear ODE"):
-    st.session_state.current_ode = []
-    st.rerun()
+                    st.session_state.current_ode = []
+                    st.rerun()
         
         if st.button("🎨 Generate with AI", type="primary"):
             with st.spinner("AI is creating novel ODEs..."):
@@ -339,8 +339,8 @@ class IntegratedODEInterface:
                 st.plotly_chart(fig, use_container_width=True)
             
             if auto_refresh:
-    time.sleep(5)
-    st.rerun()
+                time.sleep(5)
+                st.rerun()
         
         with tab2:
             st.markdown("### System Logs")
