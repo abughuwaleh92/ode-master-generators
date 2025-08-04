@@ -82,7 +82,7 @@ class IntegratedODEInterface:
             st.sidebar.warning("⚠️ API Offline - Limited Functionality")
            if st.sidebar.button("🔄 Retry Connection"):
                st.rerun()
-            return False
+               return False
         
     def run(self):
         """Main interface runner"""
