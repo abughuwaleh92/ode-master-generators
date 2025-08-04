@@ -19,3 +19,4 @@ sympy==1.12
 pandas==2.1.4
 python-multipart==0.0.6
 aiofiles==23.2.1
+aiofiles
