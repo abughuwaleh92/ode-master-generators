@@ -74,15 +74,16 @@ except:
 import os
 import streamlit as st
 
-# Configuration - Use Streamlit secrets if available, otherwise environment/defaults
-if hasattr(st, 'secrets') and 'API_BASE_URL' in st.secrets:
-    API_BASE_URL = st.secrets['API_BASE_URL']
-    API_KEY = st.secrets['API_KEY']
-else:
-    API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000/api/v1')
-    API_KEY = os.getenv('API_KEY', 'your-secret-key-1')
+# Configuration - Use environment variables for Railway
+API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000/api/v1')
+API_KEY = os.getenv('API_KEY', 'test-key')
 
-MONITORING_URL = os.getenv('MONITORING_URL', 'http://localhost:8050')
+# Debug: Show configuration source
+st.sidebar.markdown("### Configuration")
+if os.getenv('API_BASE_URL'):
+    st.sidebar.success("✅ Using Railway environment variables")
+else:
+    st.sidebar.warning("⚠️ Using default configuration"))
 
 class IntegratedODEInterface:
     def __init__(self):
