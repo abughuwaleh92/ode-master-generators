@@ -20,8 +20,29 @@ import os
 import streamlit as st
 import requests
 import json
-# Import with alias so you don't need to change the rest of the code
-from pipeline.generator import ODEDatasetGenerator as ODEGenerator
+
+# Configuration - Use Streamlit secrets for production
+if 'API_BASE_URL' in st.secrets:
+    API_BASE_URL = st.secrets['API_BASE_URL']
+    API_KEY = st.secrets['API_KEY']
+else:
+    # Fallback for local development
+    API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000/api/v1')
+    API_KEY = os.getenv('API_KEY', 'your-test-key')
+
+# Show connection status
+st.sidebar.markdown("### Connection Status")
+try:
+    # Remove /api/v1 and add /health
+    health_url = API_BASE_URL.replace('/api/v1', '/health')
+    response = requests.get(health_url, timeout=5)
+    if response.status_code == 200:
+        st.sidebar.success("✅ Connected to API")
+    else:
+        st.sidebar.error("❌ API Connection Failed")
+except Exception as e:
+    st.sidebar.warning("⚠️ API Offline")
+    st.sidebar.text(f"URL: {API_BASE_URL}")
 
 # Get configuration from Streamlit secrets or environment
 if 'API_BASE_URL' in st.secrets:
