@@ -678,39 +678,43 @@ class IntegratedODEInterface:
             except Exception as e:
                 st.error(f"❌ Error: {type(e).__name__}: {str(e)}")
     
-    def _test_generate_endpoint(self):
-        """Test generation endpoint"""
-        with st.spinner("Testing ODE generation..."):
-            try:
-                test_data = {
-                    "generator": "L1",
-                    "function": "sine",
-                    "count": 1,
-                    "verify": True
-                }
+def _test_generate_endpoint(self):
+    """Test generation endpoint"""
+    with st.spinner("Testing ODE generation..."):
+        try:
+            test_data = {
+                "generator": "L1",
+                "function": "sine",
+                "count": 1,
+                "verify": True
+            }
+            
+            url = f"{API_BASE_URL}/generate"
+            st.code(f"POST {url}")
+            st.code(f"Body: {json.dumps(test_data, indent=2)}")
+            
+            # DEBUG: Show actual headers
+            st.code(f"Headers: {json.dumps(self.api_headers, indent=2)}")
+            st.info(f"API_KEY from env: {API_KEY}")
+            
+            response = requests.post(
+                url,
+                headers=self.api_headers,
+                json=test_data,
+                timeout=10
+            )
+            
+            st.code(f"Status: {response.status_code}")
+            
+            if response.status_code == 200:
+                st.success("✅ Generation endpoint working!")
+                st.json(response.json())
+            else:
+                st.error(f"❌ Generation failed: {response.status_code}")
+                st.text(response.text)
                 
-                url = f"{API_BASE_URL}/generate"
-                st.code(f"POST {url}")
-                st.code(f"Body: {json.dumps(test_data, indent=2)}")
-                
-                response = requests.post(
-                    url,
-                    headers=self.api_headers,
-                    json=test_data,
-                    timeout=10
-                )
-                
-                st.code(f"Status: {response.status_code}")
-                
-                if response.status_code == 200:
-                    st.success("✅ Generation endpoint working!")
-                    st.json(response.json())
-                else:
-                    st.error(f"❌ Generation failed: {response.status_code}")
-                    st.text(response.text)
-                    
-            except Exception as e:
-                st.error(f"❌ Error: {type(e).__name__}: {str(e)}")
+        except Exception as e:
+            st.error(f"❌ Error: {type(e).__name__}: {str(e)}")
     
     def _call_api_generate(self, config):
         """Call generation API"""
