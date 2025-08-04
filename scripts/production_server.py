@@ -98,8 +98,11 @@ active_jobs_gauge = Gauge('active_jobs', 'Number of active jobs')
 VALID_API_KEY = os.getenv('API_KEY', 'your-secret-key-1')
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-def verify_api_key(api_key: str = Depends(API_KEY_HEADER)):    # ← REPLACE THIS FUNCTION
+def verify_api_key(api_key: str = Depends(API_KEY_HEADER)):
     """Verify API key"""
+    print(f"DEBUG: Received API key: {api_key}")  # Add this
+    print(f"DEBUG: Expected API key: {VALID_API_KEY}")  # Add this
+    
     if not api_key:
         raise HTTPException(
             status_code=403, 
@@ -107,14 +110,9 @@ def verify_api_key(api_key: str = Depends(API_KEY_HEADER)):    # ← REPLACE THI
         )
     
     # Temporarily accept any key for testing
+    print("DEBUG: Accepting any API key for testing")  # Add this
     return api_key
     
-    # Original code (commented out for testing):
-    # valid_keys = [VALID_API_KEY, "your-secret-key-1", "your-secret-key-2"]
-    # if api_key not in valid_keys:
-    #     raise HTTPException(status_code=403, detail="Invalid API key")
-    # return api_key
-
 # Request/Response models
 class ODEGenerationRequest(BaseModel):
     generator: str = Field(..., description="Generator name (e.g., L1, N1)")
