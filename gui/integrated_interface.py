@@ -18,6 +18,13 @@ from pathlib import Path
 import time
 import os
 
+   """Main interface runner"""
+        st.set_page_config(
+            page_title="ODE Master Generator - Integrated System",
+            page_icon="🔬",
+            layout="wide"
+        )
+
 # Configuration with better error handling
 def load_config():
     """Load configuration from environment or secrets"""
@@ -87,13 +94,7 @@ class IntegratedODEInterface:
         self.session_state = st.session_state
         
     def run(self):
-        """Main interface runner"""
-        st.set_page_config(
-            page_title="ODE Master Generator - Integrated System",
-            page_icon="🔬",
-            layout="wide"
-        )
-        
+             
         # Sidebar navigation
         page = st.sidebar.selectbox(
             "Navigation",
