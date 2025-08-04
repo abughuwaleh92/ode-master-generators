@@ -1,32 +1,40 @@
 # gui/integrated_interface.py
 """
-Integrated GUI that connects to all backend services
-- Uses the production API server
-- Integrates with ML models
-- Connects to monitoring services
+Integrated GUI that connects to all backend services.
+
+• Uses the production API server
+• Integrates with ML models
+• Connects to monitoring services
 """
-import streamlit as st
-import requests
+
+import os
+import time
 import json
+import asyncio
+from pathlib import Path
+from datetime import datetime
+
+import httpx                       # lighter than requests + async support
+import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime
 import plotly.graph_objects as go
-import asyncio
-import aiohttp
-from pathlib import Path
-import time
-import os
+import aiohttp                     # keep if you plan async calls to ML models
 
-   """Main interface runner"""
-        st.set_page_config(
-            page_title="ODE Master Generator - Integrated System",
-            page_icon="🔬",
-            layout="wide"
-        )
+# ──────────────────────────────────────────────────────────────────────────
+#  PAGE-WIDE CONFIGURATION
+# ──────────────────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="ODE Master Generator – Integrated System",
+    page_icon="🔬",
+    layout="wide",
+)
 
-# Configuration with better error handling
-def load_config():
+
+# ──────────────────────────────────────────────────────────────────────────
+#  CONFIG LOADER
+# ──────────────────────────────────────────────────────────────────────────
+def load_config() -> dict:
     """Load configuration from environment or secrets"""
     config = {
         'API_BASE_URL': None,
