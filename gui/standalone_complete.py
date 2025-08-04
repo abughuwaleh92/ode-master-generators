@@ -25,7 +25,7 @@ st.set_page_config(
 
 # Import ODE modules with error handling
 try:
-    from pipeline.generator import ODEGenerator
+    from pipeline.generator import ODEDatasetGenerator
     from verification.verifier import ODEVerifier
     from analyze_dataset import DatasetAnalyzer
     MODULES_AVAILABLE = True
