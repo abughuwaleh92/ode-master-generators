@@ -18,13 +18,6 @@ from pathlib import Path
 import time
 import os
 
-# Page config
-st.set_page_config(
-    page_title="ODE Master Generator - Integrated System",
-    page_icon="🔬",
-    layout="wide"
-)
-
 # Configuration with better error handling
 def load_config():
     """Load configuration from environment or secrets"""
