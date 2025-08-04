@@ -383,6 +383,14 @@ async def startup_event():
     print(f"Redis available: {REDIS_AVAILABLE}")
     print(f"Generators available: {GENERATORS_AVAILABLE}")
     print(f"API Key configured: {'Yes' if VALID_API_KEY != 'your-secret-key-1' else 'No (using default)'}")
+    
+    # Debug: Try to manually test generator
+    if GENERATORS_AVAILABLE:
+        try:
+            test_result = ode_generator.generate_single("L1", "sine", {"alpha": 1.0})
+            print(f"Generator test: {'Success' if test_result else 'Failed'}")
+        except Exception as e:
+            print(f"Generator test error: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
