@@ -15,7 +15,14 @@ import io
 from pipeline.generator import ODEDatasetGenerator as ODEGenerator
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# IMPORTANT: Add project root to path BEFORE imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# NOW import after path is set
+try:
+    from pipeline.generator import ODEDatasetGenerator as ODEGenerator
+    from verification.verifier import ODEVerifie
+    
 # Page config
 st.set_page_config(
     page_title="ODE Master Generator - Complete System",
@@ -24,17 +31,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Import ODE modules with error handling
-try:
-    from pipeline.generator import ODEGenerator
-    from verification.verifier import ODEVerifier
-    from analyze_dataset import DatasetAnalyzer
-    MODULES_AVAILABLE = True
-except ImportError as e:
-    MODULES_AVAILABLE = False
-    st.error(f"Error importing modules: {e}")
-    st.info("Make sure all project files are present")
-
+    
 # Initialize session state
 if 'generated_odes' not in st.session_state:
     st.session_state.generated_odes = []
