@@ -36,6 +36,7 @@ flask-cors>=4.0.0
 fastapi>=0.100.0
 uvicorn>=0.23.0
 python-multipart>=0.0.6
+aiofiles
 
 # CLI interface
 click>=8.1.0
