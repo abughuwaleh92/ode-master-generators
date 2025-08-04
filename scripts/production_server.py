@@ -98,7 +98,7 @@ active_jobs_gauge = Gauge('active_jobs', 'Number of active jobs')
 VALID_API_KEY = os.getenv('API_KEY', 'your-secret-key-1')
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-def verify_api_key(api_key: str = Depends(API_KEY_HEADER)):
+def verify_api_key(api_key: str = Depends(API_KEY_HEADER)):    # ← REPLACE THIS FUNCTION
     """Verify API key"""
     if not api_key:
         raise HTTPException(
@@ -106,12 +106,14 @@ def verify_api_key(api_key: str = Depends(API_KEY_HEADER)):
             detail="API key required. Add 'X-API-Key' header."
         )
     
-    # For Railway, use environment variable
-    valid_keys = [VALID_API_KEY, "your-secret-key-1", "your-secret-key-2"]
-    
-    if api_key not in valid_keys:
-        raise HTTPException(status_code=403, detail="Invalid API key")
+    # Temporarily accept any key for testing
     return api_key
+    
+    # Original code (commented out for testing):
+    # valid_keys = [VALID_API_KEY, "your-secret-key-1", "your-secret-key-2"]
+    # if api_key not in valid_keys:
+    #     raise HTTPException(status_code=403, detail="Invalid API key")
+    # return api_key
 
 # Request/Response models
 class ODEGenerationRequest(BaseModel):
