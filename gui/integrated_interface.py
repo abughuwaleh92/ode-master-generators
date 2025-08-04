@@ -80,9 +80,9 @@ class IntegratedODEInterface:
                 return False
         except requests.exceptions.RequestException as e:
             st.sidebar.warning("⚠️ API Offline - Limited Functionality")
-           if st.sidebar.button("🔄 Retry Connection"):
-               st.rerun()
-               return False
+            if st.sidebar.button("🔄 Retry Connection"):
+                st.rerun()
+            return False
         
     def run(self):
         """Main interface runner"""
@@ -678,7 +678,7 @@ class IntegratedODEInterface:
             except Exception as e:
                 st.error(f"❌ Error: {type(e).__name__}: {str(e)}")
     
-def _test_generate_endpoint(self):
+    def _test_generate_endpoint(self):
     """Test generation endpoint"""
     with st.spinner("Testing ODE generation..."):
         try:
@@ -690,12 +690,9 @@ def _test_generate_endpoint(self):
             }
             
             url = f"{API_BASE_URL}/generate"
-            st.code(f"POST {url}")
-            st.code(f"Body: {json.dumps(test_data, indent=2)}")
             
-            # DEBUG: Show actual headers
-            st.code(f"Headers: {json.dumps(self.api_headers, indent=2)}")
-            st.info(f"API_KEY from env: {API_KEY}")
+            # Debug: Show headers being sent
+            st.code(f"Headers being sent: {json.dumps(self.api_headers, indent=2)}")
             
             response = requests.post(
                 url,
@@ -703,6 +700,8 @@ def _test_generate_endpoint(self):
                 json=test_data,
                 timeout=10
             )
+            
+            # ... rest of the function
             
             st.code(f"Status: {response.status_code}")
             
