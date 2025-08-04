@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["python39", "gcc"]
+
+[phases.install]
+cmds = ["pip install -r requirements-gui.txt"]
+
+[start]
+cmd = "streamlit run gui/integrated_interface.py --server.port $PORT --server.address 0.0.0.0"
