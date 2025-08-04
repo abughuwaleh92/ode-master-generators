@@ -12,31 +12,35 @@ import time
 from typing import List, Dict, Optional
 import io
 
-# IMPORTANT: Add project root to path BEFORE imports
+# Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import ODE modules with error handling
-try:
-    from pipeline.generator import ODEDatasetGenerator as ODEGenerator
-    from verification.verifier import ODEVerifier
-    # Check if analyzer exists before importing
-    try:
-        from analyze_dataset import DatasetAnalyzer
-    except ImportError:
-        DatasetAnalyzer = None
-    MODULES_AVAILABLE = True
-except ImportError as e:
-    MODULES_AVAILABLE = False
-    st.error(f"Error importing modules: {e}")
-    st.info("Make sure all project files are present")
-
-# Page config - must come after imports but before other Streamlit calls
+# Page config
 st.set_page_config(
     page_title="ODE Master Generator - Complete System",
     page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Import ODE modules with error handling
+try:
+    from pipeline.generator import ODEGenerator
+    from verification.verifier import ODEVerifier
+    from analyze_dataset import DatasetAnalyzer
+    MODULES_AVAILABLE = True
+except ImportError as e:
+    MODULES_AVAILABLE = False
+    st.error(f"Error importing modules: {e}")
+    st.info("Make sure all project files are present")
+
+# Initialize session state
+if 'generated_odes' not in st.session_state:
+    st.session_state.generated_odes = []
+if 'current_dataset' not in st.session_state:
+    st.session_state.current_dataset = []
+if 'training_history' not in st.session_state:
+    st.session_state.training_history = []
 
 class StandaloneODEInterface:
     """Complete ODE System without external API"""
