@@ -83,7 +83,7 @@ st.sidebar.markdown("### Configuration")
 if os.getenv('API_BASE_URL'):
     st.sidebar.success("✅ Using Railway environment variables")
 else:
-    st.sidebar.warning("⚠️ Using default configuration"))
+    st.sidebar.warning("⚠️ Using default configuration")
 
 class IntegratedODEInterface:
     def __init__(self):
