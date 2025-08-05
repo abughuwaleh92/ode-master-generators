@@ -1598,7 +1598,6 @@ solution = sp.exp(-x) * (sp.cos(x) + sp.sin(x))
                             file_name=f"processed_dataset_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                             mime="text/csv"
                         )
-    ```python
     # ─────────────────────────────────────────────────────────────────────
     # MONITORING SECTION (continued)
     # ─────────────────────────────────────────────────────────────────────
