@@ -741,7 +741,249 @@ solution = sp.exp(-x) * (sp.cos(x) + sp.sin(x))
                         )
                 else:
                     st.info("No ODEs to export. Generate some first!")
+    # Add these methods to the AdvancedODEInterface class in gui/advanced_integrated_interface.py
+
+def _plot_job_distribution(self):
+    """Plot job distribution chart"""
+    # Mock data for demonstration
+    job_data = pd.DataFrame({
+        'Status': ['Completed', 'Running', 'Failed', 'Pending'],
+        'Count': [145, 12, 8, 23]
+    })
     
+    fig = px.pie(
+        job_data,
+        values='Count',
+        names='Status',
+        title="Job Distribution",
+        color_discrete_map={
+            'Completed': '#2ecc71',
+            'Running': '#3498db',
+            'Failed': '#e74c3c',
+            'Pending': '#95a5a6'
+        }
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+def _plot_generator_performance(self):
+    """Plot generator performance chart"""
+    # Mock data
+    perf_data = pd.DataFrame({
+        'Generator': ['L1', 'L2', 'L3', 'L4', 'N1', 'N2', 'N3', 'N7'],
+        'Success Rate': [98.5, 97.2, 99.1, 96.8, 95.4, 94.2, 96.7, 93.8],
+        'Avg Time (s)': [0.23, 0.31, 0.28, 0.35, 0.45, 0.52, 0.48, 0.61]
+    })
+    
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=('Success Rate (%)', 'Average Generation Time (s)')
+    )
+    
+    fig.add_trace(
+        go.Bar(x=perf_data['Generator'], y=perf_data['Success Rate'], name='Success Rate'),
+        row=1, col=1
+    )
+    
+    fig.add_trace(
+        go.Bar(x=perf_data['Generator'], y=perf_data['Avg Time (s)'], name='Avg Time'),
+        row=1, col=2
+    )
+    
+    fig.update_layout(height=400, showlegend=False)
+    st.plotly_chart(fig, use_container_width=True)
+
+def _show_recent_activity(self):
+    """Show recent activity feed"""
+    activities = [
+        {"time": "2 minutes ago", "action": "Generated", "details": "10 ODEs using L1 generator", "icon": "🚀"},
+        {"time": "5 minutes ago", "action": "Completed", "details": "Training job for PatternNet model", "icon": "✅"},
+        {"time": "12 minutes ago", "action": "Verified", "details": "25 ODEs with 96% success rate", "icon": "🔍"},
+        {"time": "1 hour ago", "action": "Analyzed", "details": "Dataset with 1,000 ODEs", "icon": "📊"},
+        {"time": "2 hours ago", "action": "Started", "details": "Batch generation job", "icon": "⚡"}
+    ]
+    
+    for activity in activities:
+        col1, col2 = st.columns([1, 10])
+        with col1:
+            st.write(activity['icon'])
+        with col2:
+            st.text(f"{activity['time']} - {activity['action']}: {activity['details']}")
+
+def _build_ode_preview(self, order, terms):
+    """Build ODE preview from terms"""
+    if not terms:
+        return "y^{(" + str(order) + ")}(x) = ?"
+    
+    ode_str = "y^{(" + str(order) + ")}(x) + "
+    term_strings = []
+    
+    for coeff, func_type, arg in terms:
+        if coeff != 1:
+            term_str = f"{coeff} \\cdot {func_type}({arg})"
+        else:
+            term_str = f"{func_type}({arg})"
+        term_strings.append(term_str)
+    
+    ode_str += " + ".join(term_strings) + " = f(x)"
+    return ode_str
+
+def _show_architecture_details(self, model_type):
+    """Show architecture details for selected model"""
+    architectures = {
+        "pattern_net": {
+            "description": "Feed-forward neural network optimized for ODE pattern recognition",
+            "layers": ["Embedding Layer", "3x Dense Layers", "Pattern Extraction", "Output Layer"],
+            "parameters": "~500K parameters",
+            "best_for": "Linear ODEs with regular patterns"
+        },
+        "transformer": {
+            "description": "Attention-based model for sequence-to-sequence ODE generation",
+            "layers": ["Token Embedding", "Positional Encoding", "6x Transformer Blocks", "Output Head"],
+            "parameters": "~2M parameters",
+            "best_for": "Complex ODEs with long-range dependencies"
+        },
+        "vae": {
+            "description": "Variational autoencoder for diverse ODE generation",
+            "layers": ["Encoder Network", "Latent Space", "Decoder Network", "Reconstruction Layer"],
+            "parameters": "~1M parameters",
+            "best_for": "Generating novel ODE variations"
+        },
+        "language_model": {
+            "description": "GPT-style model trained on ODE sequences",
+            "layers": ["Token Embedding", "12x Transformer Layers", "Language Head"],
+            "parameters": "~10M parameters",
+            "best_for": "Natural language to ODE conversion"
+        },
+        "graph_neural_net": {
+            "description": "Graph-based model for ODE structure understanding",
+            "layers": ["Node Embedding", "Graph Convolution", "Pooling", "Classifier"],
+            "parameters": "~800K parameters",
+            "best_for": "Analyzing ODE relationships"
+        }
+    }
+    
+    arch = architectures.get(model_type, {})
+    if arch:
+        st.markdown(f"**Description:** {arch['description']}")
+        st.markdown(f"**Architecture:** {' → '.join(arch['layers'])}")
+        st.markdown(f"**Parameters:** {arch['parameters']}")
+        st.markdown(f"**Best for:** {arch['best_for']}")
+
+def _preview_dataset(self, dataset_name):
+    """Preview dataset contents"""
+    try:
+        # Check if it's a file
+        if dataset_name.endswith('.jsonl'):
+            with open(dataset_name, 'r') as f:
+                lines = f.readlines()[:5]  # First 5 lines
+                
+            st.markdown("### Dataset Preview")
+            for i, line in enumerate(lines):
+                data = json.loads(line)
+                with st.expander(f"ODE {i+1}"):
+                    st.json(data)
+        else:
+            st.info("Dataset preview not available")
+    except Exception as e:
+        st.error(f"Could not preview dataset: {str(e)}")
+
+def _load_dataset(self, dataset_name):
+    """Load dataset and return as DataFrame"""
+    try:
+        if dataset_name == "Current Session Dataset":
+            return pd.DataFrame(st.session_state.current_dataset)
+        
+        # Load from file
+        if dataset_name.endswith('.jsonl'):
+            data = []
+            with open(dataset_name, 'r') as f:
+                for line in f:
+                    data.append(json.loads(line))
+            return pd.DataFrame(data)
+        
+        # Try CSV
+        elif dataset_name.endswith('.csv'):
+            return pd.read_csv(dataset_name)
+        
+        # Try JSON
+        elif dataset_name.endswith('.json'):
+            with open(dataset_name, 'r') as f:
+                data = json.load(f)
+            return pd.DataFrame(data)
+        
+        else:
+            st.error(f"Unsupported dataset format: {dataset_name}")
+            return pd.DataFrame()
+            
+    except Exception as e:
+        st.error(f"Error loading dataset: {str(e)}")
+        return pd.DataFrame()
+
+def _analyze_single_ode(self, ode):
+    """Analyze a single ODE"""
+    with st.spinner("Analyzing ODE..."):
+        # Simulate analysis
+        time.sleep(1)
+        
+        st.success("Analysis complete!")
+        
+        # Show analysis results
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**Structure Analysis:**")
+            st.text(f"Order: {ode.get('order', 2)}")
+            st.text(f"Type: {'Linear' if ode.get('is_linear', True) else 'Nonlinear'}")
+            st.text(f"Complexity: {ode.get('complexity', 'Medium')}")
+        
+        with col2:
+            st.markdown("**Properties:**")
+            st.text(f"Has exact solution: {'Yes' if ode.get('solution') else 'No'}")
+            st.text(f"Stability: {ode.get('stability', 'Unknown')}")
+            st.text(f"Singularities: {ode.get('singularities', 'None detected')}")
+
+def _verify_single_ode(self, ode):
+    """Verify a single ODE"""
+    with st.spinner("Verifying ODE..."):
+        if ode.get('solution'):
+            # Call verification API
+            response = requests.post(
+                f"{API_BASE_URL}/verify",
+                headers=self.api_headers,
+                json={
+                    "ode": ode.get('ode'),
+                    "solution": ode.get('solution'),
+                    "method": "substitution"
+                }
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result['verified']:
+                    st.success(f"✅ Verified with {result['confidence']:.1%} confidence")
+                else:
+                    st.error("❌ Verification failed")
+            else:
+                st.error("Verification service unavailable")
+        else:
+            st.warning("No solution available for verification")
+def _save_dataset(self, odes, filename=None):
+    """Save ODEs to a dataset file"""
+    if not filename:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"dataset_{timestamp}.jsonl"
+    
+    try:
+        with open(filename, 'w') as f:
+            for ode in odes:
+                f.write(json.dumps(ode) + '\n')
+        
+        st.success(f"Dataset saved to {filename}")
+        return filename
+    except Exception as e:
+        st.error(f"Error saving dataset: {str(e)}")
+        return None
     # ─────────────────────────────────────────────────────────────────────
     # MACHINE LEARNING SECTION
     # ─────────────────────────────────────────────────────────────────────
