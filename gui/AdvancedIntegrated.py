@@ -2947,7 +2947,304 @@ class AdvancedODEInterface:
     # ─────────────────────────────────────────────────────────────────────
     # HELPER METHODS - 100% REAL IMPLEMENTATIONS
     # ─────────────────────────────────────────────────────────────────────
+    # Add these methods to the AdvancedODEInterface class (add after line ~3000 where other helper methods are defined)
+def _call_api_generate(self, params: Dict) -> Dict:
+    """Call generation API"""
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/generate",
+            headers=self.api_headers,
+            json=params,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return {'status': 'success', 'data': response.json()}
+        else:
+            return {'status': 'error', 'error': response.text}
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+def _call_api_train(self, params: Dict) -> Dict:
+    """Call ML training API"""
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/ml/train",
+            headers=self.api_headers,
+            json=params,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return {'status': 'success', 'data': response.json()}
+        else:
+            return {'status': 'error', 'error': response.text}
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+def _call_api_analyze(self, params: Dict) -> Dict:
+    """Call analysis API"""
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/analyze",
+            headers=self.api_headers,
+            json=params,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return {'status': 'success', 'data': response.json()}
+        else:
+            return {'status': 'error', 'error': response.text}
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+def _call_api_ml_generate(self, params: Dict) -> Dict:
+    """Call ML generation API"""
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/ml/generate",
+            headers=self.api_headers,
+            json=params,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return {'status': 'success', 'data': response.json()}
+        else:
+            return {'status': 'error', 'error': response.text}
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+def _poll_job_status_advanced(self, job_id: str, max_polls: int = 100) -> Optional[Dict]:
+    """Poll job status with advanced progress tracking"""
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    metrics_container = st.container()
     
+    for i in range(max_polls):
+        try:
+            response = requests.get(
+                f"{API_BASE_URL}/jobs/{job_id}",
+                headers=self.api_headers
+            )
+            
+            if response.status_code == 200:
+                job_status = response.json()
+                
+                # Update progress
+                progress = job_status.get('progress', 0)
+                progress_bar.progress(progress / 100)
+                
+                # Update status
+                status_text.text(f"Status: {job_status['status']} - {progress:.0f}%")
+                
+                # Show metrics if available
+                if 'metadata' in job_status and job_status['metadata']:
+                    with metrics_container:
+                        cols = st.columns(len(job_status['metadata']))
+                        for idx, (key, value) in enumerate(job_status['metadata'].items()):
+                            with cols[idx]:
+                                st.metric(key.replace('_', ' ').title(), value)
+                
+                # Check if completed
+                if job_status['status'] == 'completed':
+                    progress_bar.progress(1.0)
+                    status_text.success("✅ Job completed successfully!")
+                    return job_status.get('results')
+                
+                elif job_status['status'] == 'failed':
+                    progress_bar.progress(1.0)
+                    status_text.error(f"❌ Job failed: {job_status.get('error', 'Unknown error')}")
+                    return None
+            
+            time.sleep(2)
+            
+        except Exception as e:
+            status_text.error(f"Error polling job status: {str(e)}")
+            return None
+    
+    status_text.warning("⚠️ Job polling timed out")
+    return None
+
+def _get_job_status(self, job_id: str) -> Optional[Dict]:
+    """Get job status without polling"""
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/jobs/{job_id}",
+            headers=self.api_headers
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except:
+        return None
+
+def _save_current_dataset_temp(self) -> str:
+    """Save current dataset to temporary file"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    temp_path = f"temp_dataset_{timestamp}.jsonl"
+    
+    with open(temp_path, 'w') as f:
+        for ode in st.session_state.current_dataset:
+            f.write(json.dumps(ode) + '\n')
+    
+    return temp_path
+
+def _load_dataset(self, dataset_path: str) -> Optional[pd.DataFrame]:
+    """Load dataset from path"""
+    try:
+        if dataset_path.endswith('.jsonl'):
+            data = []
+            with open(dataset_path, 'r') as f:
+                for line in f:
+                    if line.strip():
+                        data.append(json.loads(line))
+            return pd.DataFrame(data)
+        elif dataset_path.endswith('.csv'):
+            return pd.read_csv(dataset_path)
+        elif dataset_path.endswith('.parquet'):
+            return pd.read_parquet(dataset_path)
+        return None
+    except Exception as e:
+        st.error(f"Failed to load dataset: {str(e)}")
+        return None
+
+def _display_generation_results(self, results: List[Dict], export_format: str):
+    """Display generation results with export options"""
+    st.success(f"Generated {len(results)} ODEs successfully!")
+    
+    # Display ODEs
+    for i, ode in enumerate(results):
+        with st.expander(f"ODE {i+1} - {ode.get('generator', 'Unknown')} + {ode.get('function', 'Unknown')}"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**ODE:**")
+                st.code(ode.get('ode', ''))
+                
+                st.markdown("**Solution:**")
+                st.code(ode.get('solution', ''))
+            
+            with col2:
+                st.markdown("**Properties:**")
+                st.json({
+                    'Verified': ode.get('verified', False),
+                    'Complexity': ode.get('complexity', 0),
+                    'Parameters': ode.get('parameters', {})
+                })
+    
+    # Export options
+    st.markdown("### Export Results")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("📄 Export as JSON"):
+            self._export_results(results, 'json')
+    
+    with col2:
+        if st.button("📊 Export as CSV"):
+            self._export_results(results, 'csv')
+    
+    with col3:
+        if st.button("📝 Export as LaTeX"):
+            self._export_results(results, 'latex')
+    
+    with col4:
+        if st.button("🐍 Export as Python"):
+            self._export_results(results, 'python')
+
+def _export_results(self, results: List[Dict], format: str):
+    """Export results in specified format"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    if format == 'json':
+        filename = f"odes_{timestamp}.json"
+        with open(filename, 'w') as f:
+            json.dump(results, f, indent=2)
+    
+    elif format == 'csv':
+        filename = f"odes_{timestamp}.csv"
+        df = pd.DataFrame(results)
+        df.to_csv(filename, index=False)
+    
+    elif format == 'latex':
+        filename = f"odes_{timestamp}.tex"
+        with open(filename, 'w') as f:
+            f.write("\\documentclass{article}\n")
+            f.write("\\usepackage{amsmath}\n")
+            f.write("\\begin{document}\n\n")
+            
+            for i, ode in enumerate(results):
+                f.write(f"\\section{{ODE {i+1}}}\n")
+                f.write("\\begin{equation}\n")
+                f.write(ode.get('ode_latex', ode.get('ode', '')))
+                f.write("\n\\end{equation}\n\n")
+                
+                f.write("Solution:\n")
+                f.write("\\begin{equation}\n")
+                f.write(ode.get('solution_latex', ode.get('solution', '')))
+                f.write("\n\\end{equation}\n\n")
+            
+            f.write("\\end{document}")
+    
+    elif format == 'python':
+        filename = f"odes_{timestamp}.py"
+        with open(filename, 'w') as f:
+            f.write("# Generated ODEs\n")
+            f.write("# By ODE Master Generator\n\n")
+            f.write("odes = [\n")
+            
+            for ode in results:
+                f.write("    {\n")
+                f.write(f"        'ode': '{ode.get('ode', '')}',\n")
+                f.write(f"        'solution': '{ode.get('solution', '')}',\n")
+                f.write(f"        'generator': '{ode.get('generator', '')}',\n")
+                f.write(f"        'function': '{ode.get('function', '')}',\n")
+                f.write(f"        'verified': {ode.get('verified', False)},\n")
+                f.write(f"        'parameters': {ode.get('parameters', {})}\n")
+                f.write("    },\n")
+            
+            f.write("]\n")
+    
+    st.success(f"Results exported to {filename}")
+
+def _display_ml_generation_results(self, results: Dict):
+    """Display ML generation results"""
+    st.success(f"Generated {len(results.get('odes', []))} ODEs using ML model!")
+    
+    # Metrics
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Avg Novelty Score", f"{results.get('avg_novelty_score', 0):.2f}")
+    
+    with col2:
+        st.metric("Diversity Score", f"{results.get('diversity_score', 0):.2f}")
+    
+    with col3:
+        st.metric("Valid Rate", f"{results.get('valid_rate', 0):.1%}")
+    
+    # Display generated ODEs
+    st.markdown("### Generated ODEs")
+    
+    for i, ode in enumerate(results.get('odes', [])[:20]):  # Show first 20
+        with st.expander(f"ML ODE {i+1}"):
+            st.markdown("**ODE:**")
+            st.code(ode.get('ode', ''))
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.metric("Novelty", f"{ode.get('novelty_score', 0):.2f}")
+            
+            with col2:
+                if ode.get('valid', False):
+                    st.success("✅ Valid")
+                else:
+                    st.error("❌ Invalid")
     def _poll_job_status_simple(self, job_id: str, max_polls: int = 50) -> Optional[List[Dict]]:
         """Simple job polling without UI updates"""
         for _ in range(max_polls):
