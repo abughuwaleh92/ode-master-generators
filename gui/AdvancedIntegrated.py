@@ -3171,7 +3171,6 @@ class AdvancedODEInterface:
         if 'generator_name' in df.columns:
             for gen in df['generator_name'].unique():
                 gen_df = df[df['generator_name'] == gen]
-                verified = gen_df​​​​​​​​​​​​​​​​
                 verified = gen_df['verified'].sum() if 'verified' in gen_df else 0
                 rate = (verified / len(gen_df) * 100) if len(gen_df) > 0 else 0
                 
