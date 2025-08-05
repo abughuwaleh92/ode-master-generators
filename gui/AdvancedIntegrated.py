@@ -1603,7 +1603,7 @@ class AdvancedODEInterface:
                 'Job ID': job['job_id'][:8] + '...',
                 'Model': job['model_type'],
                 'Dataset': job['dataset'],
-                'Started': job['started_at'].strftime('%Y-%m-%d %H:%M'),​​​​​​​​​​​​​​​​
+                'Started': job['started_at'].strftime('%Y-%m-%d %H:%M'),
                  'Status': job.get('status', 'unknown').capitalize(),
                 'Duration': str(job.get('completed_at', datetime.now()) - job['started_at']).split('.')[0] if job.get('completed_at') else 'Running'
             })
