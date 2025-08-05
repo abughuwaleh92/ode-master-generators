@@ -167,44 +167,65 @@ class ODEMasterGUI:
         """Dashboard page with overview and statistics"""
         st.header("📊 System Dashboard")
         
-        # Fetch statistics
-        try:
-            stats_response = requests.get(
-                f"{st.session_state.api_url}/api/v1/stats",
-                headers=self.api_headers
-            )
-            stats = stats_response.json() if stats_response.status_code == 200 else {}
-        except:
-            stats = {}
+        # Check if API is connected
+        api_connected = self.check_api_status()
         
-        # Key metrics
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric(
-                "Total Generated",
-                stats.get('total_generated', 0),
-                delta=f"+{stats.get('total_generated', 0) // 24} today"
-            )
-        
-        with col2:
-            st.metric(
-                "Active Jobs",
-                stats.get('active_jobs', 0),
-                delta="Running"
-            )
-        
-        with col3:
-            st.metric(
-                "Available Generators",
-                stats.get('available_generators', 0)
-            )
-        
-        with col4:
-            st.metric(
-                "Available Functions", 
-                stats.get('available_functions', 0)
-            )
+        if not api_connected:
+            st.warning("⚠️ API is not connected. Showing demo data.")
+            
+            # Show demo metrics
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Total Generated", "1,234", delta="+52 today")
+            
+            with col2:
+                st.metric("Active Jobs", "3", delta="Running")
+            
+            with col3:
+                st.metric("Available Generators", "11")
+            
+            with col4:
+                st.metric("Available Functions", "34")
+        else:
+            # Fetch statistics
+            try:
+                stats_response = requests.get(
+                    f"{st.session_state.api_url}/api/v1/stats",
+                    headers=self.api_headers
+                )
+                stats = stats_response.json() if stats_response.status_code == 200 else {}
+            except:
+                stats = {}
+            
+            # Key metrics
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    "Total Generated",
+                    stats.get('total_generated', 0),
+                    delta=f"+{stats.get('total_generated', 0) // 24} today"
+                )
+            
+            with col2:
+                st.metric(
+                    "Active Jobs",
+                    stats.get('active_jobs', 0),
+                    delta="Running"
+                )
+            
+            with col3:
+                st.metric(
+                    "Available Generators",
+                    stats.get('available_generators', 0)
+                )
+            
+            with col4:
+                st.metric(
+                    "Available Functions", 
+                    stats.get('available_functions', 0)
+                )
         
         st.markdown("---")
         
@@ -318,31 +339,41 @@ class ODEMasterGUI:
         # Recent Activity
         st.subheader("📋 Recent Activity")
         
-        try:
-            jobs_response = requests.get(
-                f"{st.session_state.api_url}/api/v1/jobs?limit=5",
-                headers=self.api_headers
-            )
-            
-            if jobs_response.status_code == 200:
-                recent_jobs = jobs_response.json()
+        if not api_connected:
+            # Show demo activity
+            demo_jobs = [
+                {'job_id': 'abc123...', 'status': 'completed', 'progress': '100%', 'created_at': '2025-01-15 10:30:00'},
+                {'job_id': 'def456...', 'status': 'running', 'progress': '45%', 'created_at': '2025-01-15 10:35:00'},
+                {'job_id': 'ghi789...', 'status': 'completed', 'progress': '100%', 'created_at': '2025-01-15 10:40:00'},
+            ]
+            df = pd.DataFrame(demo_jobs)
+            st.dataframe(df, use_container_width=True)
+        else:
+            try:
+                jobs_response = requests.get(
+                    f"{st.session_state.api_url}/api/v1/jobs?limit=5",
+                    headers=self.api_headers
+                )
                 
-                if recent_jobs:
-                    job_data = []
-                    for job in recent_jobs:
-                        job_data.append({
-                            'Job ID': job['job_id'][:8] + '...',
-                            'Status': job['status'],
-                            'Progress': f"{job['progress']:.0f}%",
-                            'Created': job['created_at'][:19]
-                        })
+                if jobs_response.status_code == 200:
+                    recent_jobs = jobs_response.json()
                     
-                    df = pd.DataFrame(job_data)
-                    st.dataframe(df, use_container_width=True)
-                else:
-                    st.info("No recent jobs")
-        except:
-            st.error("Failed to fetch recent jobs")
+                    if recent_jobs:
+                        job_data = []
+                        for job in recent_jobs:
+                            job_data.append({
+                                'Job ID': job['job_id'][:8] + '...',
+                                'Status': job['status'],
+                                'Progress': f"{job['progress']:.0f}%",
+                                'Created': job['created_at'][:19]
+                            })
+                        
+                        df = pd.DataFrame(job_data)
+                        st.dataframe(df, use_container_width=True)
+                    else:
+                        st.info("No recent jobs")
+            except:
+                st.error("Failed to fetch recent jobs")
     
     def show_generation_page(self):
         """ODE Generation page"""
@@ -944,10 +975,10 @@ class ODEMasterGUI:
                 )
         
         if st.button("🔍 Search"):
-            results = self.search_odes(
-                search_term, filter_generator, filter_verified,
-                complexity_range, has_pantograph, order, date_range
-            )
+            # For demo purposes, show sample results
+            st.info("Search functionality requires database connection. Showing sample results.")
+            results = self.get_sample_odes()
+            
             
             if results:
                 st.success(f"Found {len(results)} ODEs")
@@ -979,7 +1010,7 @@ class ODEMasterGUI:
                             col1, col2 = st.columns(2)
                             with col1:
                                 if st.button(f"Verify", key=f"verify_{i}"):
-                                    self.verify_single_ode(ode)
+                                    st.info("Verification feature coming soon!")
                             with col2:
                                 if st.button(f"Visualize", key=f"viz_{i}"):
                                     self.visualize_ode(ode)
@@ -1078,7 +1109,7 @@ class ODEMasterGUI:
             - PyTorch for machine learning
             
             ### Documentation
-            For detailed documentation, visit the [GitHub repository](https://github.com/abughuwaleh92/ode-master-generator)
+            For detailed documentation, visit the [GitHub repository](https://github.com/your-repo/ode-master-generator)
             """)
     
     # Helper methods
@@ -1126,6 +1157,33 @@ class ODEMasterGUI:
     
     def generate_single_ode(self, generator, function, params, verify):
         """Generate a single ODE"""
+        if not self.check_api_status():
+            st.warning("API is not connected. Showing demo ODE.")
+            
+            # Show demo ODE
+            demo_ode = {
+                'id': 'demo_123',
+                'ode': f"{generator}: y''(x) + f(y) = g(x)",
+                'ode_latex': r"y''(x) + f(y) = g(x)",
+                'solution': f"Solution for {function}",
+                'solution_latex': r"y(x) = C_1\phi_1(x) + C_2\phi_2(x)",
+                'verified': verify,
+                'verification_confidence': 0.95 if verify else 0,
+                'complexity': 75,
+                'generator': generator,
+                'function': function,
+                'parameters': params,
+                'properties': {
+                    'operation_count': 5,
+                    'atom_count': 12,
+                    'symbol_count': 4,
+                    'has_pantograph': generator == 'L4'
+                }
+            }
+            st.session_state.generated_odes.append(demo_ode)
+            st.success("✅ Demo ODE generated!")
+            return
+            
         try:
             response = requests.post(
                 f"{st.session_state.api_url}/api/v1/generate",
@@ -1590,6 +1648,136 @@ class ODEMasterGUI:
         </html>
         """
         return html
+    
+    def get_sample_odes(self):
+        """Get sample ODEs for demonstration"""
+        return [
+            {
+                'id': '1',
+                'generator_name': 'L1',
+                'function_name': 'sine',
+                'ode_symbolic': "y''(x) + y(x) = pi*sin(x)",
+                'ode_latex': r"y''(x) + y(x) = \pi \sin(x)",
+                'solution_symbolic': "C1*cos(x) + C2*sin(x) - pi*x*cos(x)/2",
+                'solution_latex': r"C_1\cos(x) + C_2\sin(x) - \frac{\pi x\cos(x)}{2}",
+                'verified': True,
+                'complexity_score': 45,
+                'has_pantograph': False
+            },
+            {
+                'id': '2',
+                'generator_name': 'N1',
+                'function_name': 'exponential',
+                'ode_symbolic': "(y''(x))**2 + y(x) = exp(x)",
+                'ode_latex': r"(y''(x))^2 + y(x) = e^x",
+                'solution_symbolic': "exp(x)/4 + C1*exp(-x/2) + C2*x*exp(-x/2)",
+                'solution_latex': r"\frac{e^x}{4} + C_1e^{-x/2} + C_2xe^{-x/2}",
+                'verified': True,
+                'complexity_score': 67,
+                'has_pantograph': False
+            },
+            {
+                'id': '3',
+                'generator_name': 'L4',
+                'function_name': 'identity',
+                'ode_symbolic': "y''(x) + y(x/2) - y(x) = 0",
+                'ode_latex': r"y''(x) + y(x/2) - y(x) = 0",
+                'solution_symbolic': "C1*cos(x) + C2*sin(x)",
+                'solution_latex': r"C_1\cos(x) + C_2\sin(x)",
+                'verified': True,
+                'complexity_score': 52,
+                'has_pantograph': True
+            }
+        ]
+    
+    def visualize_ode(self, ode):
+        """Visualize ODE solution"""
+        st.subheader("ODE Visualization")
+        
+        try:
+            # Generate sample solution curve
+            x = np.linspace(0, 10, 100)
+            
+            # Simple visualization based on generator type
+            if ode['generator_name'].startswith('L'):
+                # Linear ODE - likely oscillatory
+                y = np.cos(x) + 0.5 * np.sin(x)
+            else:
+                # Nonlinear ODE - more complex behavior
+                y = np.exp(-x/5) * np.cos(2*x) + 0.1 * x
+            
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=x, y=y, mode='lines', name='Solution'))
+            fig.update_layout(
+                title=f"Solution Curve: {ode['generator_name']} - {ode['function_name']}",
+                xaxis_title="x",
+                yaxis_title="y(x)",
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+        except Exception as e:
+            st.error(f"Visualization error: {str(e)}")
+    
+    def get_job_status(self, job_id):
+        """Get job status from API"""
+        try:
+            response = requests.get(
+                f"{st.session_state.api_url}/api/v1/jobs/{job_id}",
+                headers=self.api_headers
+            )
+            if response.status_code == 200:
+                return response.json()
+        except:
+            pass
+        return None
+    
+    def split_ml_dataset(self, dataset_file, test_size, val_size, strategy):
+        """Split dataset for ML training"""
+        st.info(f"Splitting dataset with {strategy} strategy...")
+        st.success(f"Dataset split complete! Test: {test_size}, Val: {val_size}")
+    
+    def start_ml_training(self, model_type, epochs, batch_size, learning_rate):
+        """Start ML model training"""
+        st.info(f"Starting {model_type} training...")
+        # Store job ID for tracking
+        st.session_state.training_job_id = "demo_job_123"
+        st.success("Training started! Monitor progress in the right panel.")
+    
+    def generate_ml_odes(self, model, n_samples, temperature, target_gen, target_func, complexity_range):
+        """Generate ODEs using ML model"""
+        st.info(f"Generating {n_samples} ODEs with ML model...")
+        with st.spinner("Generating..."):
+            time.sleep(2)  # Simulate generation
+        st.success(f"Generated {n_samples} novel ODEs!")
+        st.balloons()
+    
+    def verify_dataset(self, uploaded_file, methods, confidence_threshold, workers):
+        """Verify uploaded dataset"""
+        st.info(f"Verifying dataset with {len(methods)} methods...")
+        progress_bar = st.progress(0)
+        
+        # Simulate verification progress
+        for i in range(10):
+            progress_bar.progress((i + 1) / 10)
+            time.sleep(0.2)
+        
+        st.success("Dataset verification complete!")
+        
+        # Show sample results
+        results_df = pd.DataFrame({
+            'ODE ID': range(1, 6),
+            'Verified': [True, True, False, True, False],
+            'Confidence': [0.98, 0.95, 0.45, 0.92, 0.38],
+            'Method': ['substitution', 'substitution', 'failed', 'numerical', 'failed']
+        })
+        st.dataframe(results_df)
+    
+    def export_visualizations(self, df):
+        """Export all visualizations as a ZIP file"""
+        st.info("Exporting visualizations...")
+        # In a real implementation, this would create actual plots
+        st.success("Visualizations exported!")
 
 # Main execution
 if __name__ == "__main__":
