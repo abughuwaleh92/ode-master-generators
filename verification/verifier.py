@@ -10,6 +10,8 @@ import time
 # Import from core types
 from core.types import VerificationMethod
 from core.symbols import SYMBOLS
+from typing import Optional, Dict, Any
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +39,18 @@ def timeout(seconds):
     return decorator
 
 class ODEVerifier:
-    """Production-grade ODE verification system with timeouts"""
-    
-    def __init__(self, config: Dict[str, Any]):
-        self.test_points = config.get('numeric_test_points', [0.1, 0.3, 0.7, 1.0])
-        self.residual_tolerance = config.get('residual_tolerance', 1e-8)
-        self.timeout_seconds = config.get('verification_timeout', 30)
+    """Production-grade ODE verification system with timeouts."""
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        # Use caller-supplied configuration if present; otherwise fall back to safe defaults.
+        cfg = config or {
+            "numeric_test_points": [0.1, 0.3, 0.7, 1.0],
+            "residual_tolerance": 1e-8,
+            "verification_timeout": 30,
+        }
+        self.test_points        = cfg["numeric_test_points"]
+        self.residual_tolerance = cfg["residual_tolerance"]
+        self.timeout_seconds    = cfg["verification_timeout"]
         
     def verify(
         self, 
