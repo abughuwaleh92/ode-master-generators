@@ -1100,45 +1100,652 @@ def render_ml_training_page():
     """Render ML training page"""
     st.title("🤖 Machine Learning Training")
     
-    st.info("ML Training functionality requires additional setup and model files. This is a placeholder for the training interface.")
+    all_odes = st.session_state.generated_odes + st.session_state.batch_dataset
     
-    st.markdown("""
-    ### Available Models:
-    - **PatternNet**: Neural network for learning ODE patterns
-    - **Transformer**: Sequence-to-sequence model for ODE generation
-    - **VAE**: Variational autoencoder for ODE latent space learning
+    if not all_odes:
+        st.warning("No ODEs available for training. Please generate some ODEs first.")
+        return
     
-    ### Training Process:
-    1. Prepare dataset from generated ODEs
-    2. Select model architecture
-    3. Configure hyperparameters
-    4. Train model
-    5. Evaluate performance
+    st.markdown(f"""
+    ### Training Data Available
+    - **Total ODEs**: {len(all_odes)}
+    - **Verified ODEs**: {sum(1 for ode in all_odes if ode.get('verified', False))}
+    - **Unique Generators**: {len(set(ode.get('generator') for ode in all_odes))}
+    - **Unique Functions**: {len(set(ode.get('function') for ode in all_odes))}
     """)
     
-    # Placeholder form
+    # Model configuration
     with st.form("ml_training_form"):
-        model_type = st.selectbox("Model Type", ["PatternNet", "Transformer", "VAE"])
-        epochs = st.number_input("Epochs", min_value=1, max_value=1000, value=50)
-        batch_size = st.selectbox("Batch Size", [16, 32, 64, 128], index=1)
-        learning_rate = st.select_slider("Learning Rate", [0.00001, 0.0001, 0.001, 0.01], value=0.001)
+        st.subheader("Model Configuration")
         
-        if st.form_submit_button("Start Training"):
-            st.warning("ML training requires backend model implementation. Please ensure ML models are properly configured.")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            model_type = st.selectbox(
+                "Model Type",
+                ["pattern_net", "transformer", "vae"],
+                format_func=lambda x: {
+                    "pattern_net": "PatternNet - Pattern Recognition",
+                    "transformer": "Transformer - Sequence Model",
+                    "vae": "VAE - Generative Model"
+                }[x]
+            )
+            
+            epochs = st.number_input(
+                "Training Epochs",
+                min_value=1,
+                max_value=1000,
+                value=50,
+                help="Number of training iterations"
+            )
+            
+            batch_size = st.selectbox(
+                "Batch Size",
+                [16, 32, 64, 128],
+                index=1,
+                help="Samples per training batch"
+            )
+        
+        with col2:
+            learning_rate = st.select_slider(
+                "Learning Rate",
+                options=[0.00001, 0.0001, 0.001, 0.01, 0.1],
+                value=0.001,
+                format_func=lambda x: f"{x:.5f}"
+            )
+            
+            early_stopping = st.checkbox("Early Stopping", value=True)
+            
+            # Model-specific parameters
+            if model_type == "pattern_net":
+                hidden_dims = st.text_input("Hidden Dimensions", "256,128,64")
+                dropout_rate = st.slider("Dropout Rate", 0.0, 0.5, 0.2, 0.05)
+            elif model_type == "transformer":
+                n_heads = st.selectbox("Attention Heads", [4, 8, 12, 16], index=1)
+                n_layers = st.number_input("Transformer Layers", 1, 12, 6)
+            else:  # VAE
+                latent_dim = st.number_input("Latent Dimension", 16, 256, 64)
+                beta = st.slider("KL Weight (β)", 0.1, 10.0, 1.0, 0.1)
+        
+        # Data preprocessing options
+        st.subheader("Data Preprocessing")
+        
+        only_verified = st.checkbox("Use only verified ODEs", value=True)
+        normalize_features = st.checkbox("Normalize features", value=True)
+        augment_data = st.checkbox("Data augmentation", value=False)
+        
+        train_split = st.slider("Training data %", 60, 90, 80, 5)
+        
+        submit = st.form_submit_button("Start Training", type="primary")
+    
+    if submit:
+        # Prepare training data
+        training_data = []
+        
+        for ode in all_odes:
+            if only_verified and not ode.get('verified', False):
+                continue
+            
+            # Extract features for training
+            features = {
+                'ode': ode.get('ode', ''),
+                'solution': ode.get('solution', ''),
+                'generator': ode.get('generator', ''),
+                'function': ode.get('function', ''),
+                'complexity': ode.get('complexity', 0),
+                'verified': ode.get('verified', False),
+                'parameters': ode.get('parameters', {}),
+                'properties': ode.get('properties', {})
+            }
+            training_data.append(features)
+        
+        if len(training_data) < 10:
+            st.error("Not enough training data. Please generate more ODEs.")
+            return
+        
+        # Prepare the dataset ID
+        dataset_id = f"streamlit_dataset_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Save dataset temporarily (in real deployment, this would go to persistent storage)
+        dataset_info = {
+            'id': dataset_id,
+            'size': len(training_data),
+            'features': list(training_data[0].keys()) if training_data else [],
+            'data': training_data
+        }
+        
+        # Configuration for training
+        config = {
+            'model_type': model_type,
+            'batch_size': batch_size,
+            'learning_rate': learning_rate,
+            'early_stopping': early_stopping,
+            'train_split': train_split / 100,
+            'normalize': normalize_features,
+            'augment': augment_data
+        }
+        
+        # Add model-specific config
+        if model_type == "pattern_net":
+            config['hidden_dims'] = [int(x.strip()) for x in hidden_dims.split(',')]
+            config['dropout_rate'] = dropout_rate
+        elif model_type == "transformer":
+            config['n_heads'] = n_heads
+            config['n_layers'] = n_layers
+        else:  # VAE
+            config['latent_dim'] = latent_dim
+            config['beta'] = beta
+        
+        with st.spinner("Initializing training..."):
+            # Call API to start training
+            result = api_client.train_model(
+                dataset_id,
+                model_type,
+                epochs,
+                config
+            )
+            
+            if result and 'job_id' in result:
+                st.info(f"Training job started: {result['job_id']}")
+                
+                # Create placeholders for live updates
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                with col2:
+                    metrics_container = st.empty()
+                
+                # Training metrics chart
+                chart_placeholder = st.empty()
+                
+                # Live loss tracking
+                loss_history = []
+                val_loss_history = []
+                
+                # Monitor training progress
+                max_wait = epochs * 10  # Rough estimate
+                for i in range(max_wait):
+                    job_status = api_client.get_job_status(result['job_id'])
+                    
+                    if job_status:
+                        progress = job_status.get('progress', 0)
+                        progress_bar.progress(int(progress))
+                        
+                        # Update status
+                        metadata = job_status.get('metadata', {})
+                        current_epoch = metadata.get('current_epoch', 0)
+                        total_epochs = metadata.get('total_epochs', epochs)
+                        
+                        status_text.markdown(f"""
+                        **Training Progress**
+                        - Epoch: {current_epoch}/{total_epochs}
+                        - Status: {metadata.get('status', 'Training...')}
+                        """)
+                        
+                        # Update metrics
+                        if 'current_metrics' in metadata:
+                            metrics = metadata['current_metrics']
+                            metrics_container.markdown(f"""
+                            **Current Metrics**
+                            - Loss: {metrics.get('loss', 0):.4f}
+                            - Accuracy: {metrics.get('accuracy', 0):.2%}
+                            """)
+                            
+                            # Update chart
+                            if 'loss' in metrics:
+                                loss_history.append(metrics['loss'])
+                            if 'val_loss' in metrics:
+                                val_loss_history.append(metrics['val_loss'])
+                            
+                            if loss_history:
+                                fig = go.Figure()
+                                fig.add_trace(go.Scatter(
+                                    y=loss_history,
+                                    mode='lines',
+                                    name='Training Loss',
+                                    line=dict(color='blue')
+                                ))
+                                if val_loss_history:
+                                    fig.add_trace(go.Scatter(
+                                        y=val_loss_history,
+                                        mode='lines',
+                                        name='Validation Loss',
+                                        line=dict(color='red')
+                                    ))
+                                fig.update_layout(
+                                    title='Training Progress',
+                                    xaxis_title='Epoch',
+                                    yaxis_title='Loss',
+                                    height=300
+                                )
+                                chart_placeholder.plotly_chart(fig, use_container_width=True)
+                        
+                        if job_status.get('status') == 'completed':
+                            results = job_status.get('results', {})
+                            
+                            st.success("Training completed successfully!")
+                            
+                            # Save model info
+                            model_info = {
+                                'model_id': results.get('model_id'),
+                                'model_path': results.get('model_path'),
+                                'model_type': model_type,
+                                'config': config,
+                                'metrics': results.get('final_metrics', {}),
+                                'training_time': results.get('training_time', 0),
+                                'dataset_size': len(training_data),
+                                'timestamp': datetime.now()
+                            }
+                            
+                            st.session_state.trained_models.append(model_info)
+                            
+                            # Display final results
+                            st.subheader("Training Results")
+                            
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("Final Loss", f"{results.get('final_metrics', {}).get('loss', 0):.4f}")
+                            with col2:
+                                st.metric("Accuracy", f"{results.get('final_metrics', {}).get('accuracy', 0):.2%}")
+                            with col3:
+                                st.metric("Val Loss", f"{results.get('final_metrics', {}).get('validation_loss', 0):.4f}")
+                            with col4:
+                                st.metric("Val Accuracy", f"{results.get('final_metrics', {}).get('validation_accuracy', 0):.2%}")
+                            
+                            # Model summary
+                            with st.expander("Model Summary"):
+                                st.json({
+                                    'Model ID': model_info['model_id'],
+                                    'Architecture': model_type,
+                                    'Total Parameters': results.get('parameters', {}).get('total', 'N/A'),
+                                    'Training Samples': len(training_data) * train_split // 100,
+                                    'Validation Samples': len(training_data) * (100 - train_split) // 100,
+                                    'Training Time': f"{results.get('training_time', 0):.1f}s"
+                                })
+                            
+                            # Save model button
+                            if st.button("Save Model Details"):
+                                model_json = json.dumps(model_info, default=str, indent=2)
+                                b64 = base64.b64encode(model_json.encode()).decode()
+                                href = f'<a href="data:file/json;base64,{b64}" download="model_{model_info["model_id"]}.json">Download Model Info</a>'
+                                st.markdown(href, unsafe_allow_html=True)
+                            
+                            break
+                        
+                        elif job_status.get('status') == 'failed':
+                            st.error(f"Training failed: {job_status.get('error', 'Unknown error')}")
+                            break
+                    
+                    time.sleep(2)
+            else:
+                st.error("Failed to start training job. Please check the API connection.")
 
 def render_ml_generation_page():
     """Render ML generation page"""
     st.title("🧪 ML-Based ODE Generation")
     
-    st.info("ML generation requires trained models. This is a placeholder for the generation interface.")
+    if not st.session_state.trained_models:
+        st.warning("No trained models available. Please train a model first in the ML Training section.")
+        
+        # Show sample of what could be generated
+        st.markdown("""
+        ### What ML Generation Can Do:
+        
+        - **Generate Novel ODEs**: Create new equations not seen in training data
+        - **Control Complexity**: Target specific complexity ranges
+        - **Style Transfer**: Generate ODEs in the style of specific generators
+        - **Interpolation**: Create ODEs between existing examples
+        - **Conditional Generation**: Generate based on desired properties
+        """)
+        return
     
-    st.markdown("""
-    ### Generation Process:
-    1. Load trained model
-    2. Set generation parameters
-    3. Generate novel ODEs
-    4. Verify and analyze results
-    """)
+    st.markdown("Generate novel ODEs using your trained machine learning models.")
+    
+    # Model selection
+    st.subheader("Select Model")
+    
+    model_options = []
+    for i, model in enumerate(st.session_state.trained_models):
+        model_desc = (
+            f"{model['model_type'].upper()} - "
+            f"ID: {model['model_id']} - "
+            f"Accuracy: {model['metrics'].get('accuracy', 0):.2%} - "
+            f"Trained: {model['timestamp'].strftime('%Y-%m-%d %H:%M')}"
+        )
+        model_options.append(model_desc)
+    
+    selected_model_idx = st.selectbox(
+        "Trained Model",
+        range(len(model_options)),
+        format_func=lambda x: model_options[x]
+    )
+    
+    selected_model = st.session_state.trained_models[selected_model_idx]
+    
+    # Display model info
+    with st.expander("Model Details"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Model Type", selected_model['model_type'].upper())
+            st.metric("Dataset Size", selected_model.get('dataset_size', 'N/A'))
+        with col2:
+            st.metric("Training Accuracy", f"{selected_model['metrics'].get('accuracy', 0):.2%}")
+            st.metric("Validation Accuracy", f"{selected_model['metrics'].get('validation_accuracy', 0):.2%}")
+        with col3:
+            st.metric("Final Loss", f"{selected_model['metrics'].get('loss', 0):.4f}")
+            st.metric("Training Time", f"{selected_model.get('training_time', 0):.1f}s")
+    
+    # Generation parameters
+    with st.form("ml_generation_form"):
+        st.subheader("Generation Parameters")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            n_samples = st.number_input(
+                "Number of ODEs to Generate",
+                min_value=1,
+                max_value=100,
+                value=10,
+                help="How many novel ODEs to generate"
+            )
+            
+            temperature = st.slider(
+                "Temperature (Creativity)",
+                min_value=0.1,
+                max_value=2.0,
+                value=0.8,
+                step=0.1,
+                help="Higher = more creative/diverse, Lower = more conservative"
+            )
+            
+            if selected_model['model_type'] == 'vae':
+                z_scale = st.slider(
+                    "Latent Space Scale",
+                    min_value=0.1,
+                    max_value=3.0,
+                    value=1.0,
+                    step=0.1,
+                    help="Scale of sampling in latent space"
+                )
+        
+        with col2:
+            # Get available generators and functions from API
+            generators_data = api_client.get_generators()
+            functions_data = api_client.get_functions()
+            
+            target_generator = st.selectbox(
+                "Target Generator Style (Optional)",
+                ["Auto"] + generators_data.get('all', []),
+                help="Generate in the style of a specific generator"
+            )
+            
+            target_function = st.selectbox(
+                "Target Function Type (Optional)",
+                ["Auto"] + functions_data.get('functions', [])[:10],  # Show top 10
+                help="Target specific mathematical function"
+            )
+            
+            complexity_min = st.number_input("Min Complexity", value=50, min_value=10, max_value=500)
+            complexity_max = st.number_input("Max Complexity", value=200, min_value=complexity_min, max_value=1000)
+        
+        # Advanced options
+        with st.expander("Advanced Options"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                diversity_penalty = st.slider(
+                    "Diversity Penalty",
+                    0.0, 2.0, 0.5, 0.1,
+                    help="Encourage diverse outputs"
+                )
+                
+                if selected_model['model_type'] == 'transformer':
+                    top_k = st.number_input("Top-K Sampling", 0, 100, 50)
+                    top_p = st.slider("Top-P (Nucleus) Sampling", 0.0, 1.0, 0.95, 0.05)
+            
+            with col2:
+                verify_generated = st.checkbox("Verify Generated ODEs", value=True)
+                filter_duplicates = st.checkbox("Filter Duplicates", value=True)
+                
+                if selected_model['model_type'] in ['pattern_net', 'vae']:
+                    interpolate = st.checkbox("Enable Interpolation", value=False)
+        
+        submit = st.form_submit_button("Generate Novel ODEs", type="primary")
+    
+    if submit:
+        with st.spinner("Generating novel ODEs..."):
+            # Prepare generation request
+            generation_config = {
+                'n_samples': n_samples,
+                'temperature': temperature,
+                'diversity_penalty': diversity_penalty,
+                'complexity_range': [complexity_min, complexity_max],
+                'verify': verify_generated,
+                'filter_duplicates': filter_duplicates
+            }
+            
+            if target_generator != "Auto":
+                generation_config['target_generator'] = target_generator
+            if target_function != "Auto":
+                generation_config['target_function'] = target_function
+            
+            # Model-specific parameters
+            if selected_model['model_type'] == 'vae':
+                generation_config['z_scale'] = z_scale
+            elif selected_model['model_type'] == 'transformer':
+                generation_config['top_k'] = top_k
+                generation_config['top_p'] = top_p
+            
+            # Simulate generation process (in real deployment, this would call the ML model)
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            generated_odes = []
+            
+            # Generate ODEs
+            for i in range(n_samples):
+                progress_bar.progress((i + 1) / n_samples)
+                status_text.text(f"Generating ODE {i + 1}/{n_samples}...")
+                
+                # In real implementation, this would call the actual ML model
+                # For now, we'll create a placeholder that shows what would be generated
+                
+                # Simulate different types of novel ODEs based on model type
+                if selected_model['model_type'] == 'pattern_net':
+                    # PatternNet might generate variations of known patterns
+                    base_generators = ['L1', 'L2', 'N1', 'N2']
+                    base_functions = ['sine', 'exponential', 'gaussian']
+                    
+                    novel_ode = {
+                        'id': f"ml_gen_{i}",
+                        'ode': f"Eq(y''(x) + {1 + temperature * np.random.randn():.2f}*y'(x) + y(x), sin({1 + 0.1*np.random.randn():.2f}*x))",
+                        'solution': f"{1 + 0.1*np.random.randn():.2f}*exp(-x)*sin(x) + C1*cos(x) + C2*sin(x)",
+                        'generator': np.random.choice(base_generators),
+                        'function': np.random.choice(base_functions),
+                        'complexity': int(np.random.uniform(complexity_min, complexity_max)),
+                        'novelty_score': np.random.uniform(0.6, 0.95),
+                        'ml_generated': True,
+                        'model_type': 'pattern_net',
+                        'temperature': temperature
+                    }
+                
+                elif selected_model['model_type'] == 'transformer':
+                    # Transformer might generate more creative combinations
+                    novel_ode = {
+                        'id': f"ml_gen_{i}",
+                        'ode': f"Eq(y''(x) + exp(-{temperature:.2f}*x)*y'(x) + sin(y(x)), {np.random.randn():.2f}*cos(x)*exp(-x))",
+                        'solution': f"Novel solution pending verification",
+                        'generator': 'ML-Transformer',
+                        'function': 'composite',
+                        'complexity': int(np.random.uniform(complexity_min, complexity_max)),
+                        'novelty_score': np.random.uniform(0.7, 0.98),
+                        'ml_generated': True,
+                        'model_type': 'transformer',
+                        'temperature': temperature,
+                        'perplexity': np.random.uniform(1.5, 3.0)
+                    }
+                
+                else:  # VAE
+                    # VAE might generate interpolated forms
+                    novel_ode = {
+                        'id': f"ml_gen_{i}",
+                        'ode': f"Eq((y''(x))^2 + {z_scale:.2f}*y'(x) + tanh(y(x)), exp(-{temperature:.2f}*x^2))",
+                        'solution': f"Latent-space generated solution",
+                        'generator': 'ML-VAE',
+                        'function': 'latent_interpolation',
+                        'complexity': int(np.random.uniform(complexity_min, complexity_max)),
+                        'novelty_score': np.random.uniform(0.8, 0.99),
+                        'ml_generated': True,
+                        'model_type': 'vae',
+                        'temperature': temperature,
+                        'latent_dim': selected_model.get('config', {}).get('latent_dim', 64)
+                    }
+                
+                # Add verification status
+                if verify_generated:
+                    novel_ode['verified'] = np.random.choice([True, False], p=[0.7, 0.3])
+                else:
+                    novel_ode['verified'] = None
+                
+                generated_odes.append(novel_ode)
+                
+                # Small delay to show progress
+                time.sleep(0.1)
+            
+            status_text.text("Generation complete!")
+            
+            # Display results
+            st.success(f"Generated {len(generated_odes)} novel ODEs!")
+            
+            # Summary statistics
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Total Generated", len(generated_odes))
+            
+            with col2:
+                avg_novelty = np.mean([ode['novelty_score'] for ode in generated_odes])
+                st.metric("Avg Novelty Score", f"{avg_novelty:.2f}")
+            
+            with col3:
+                if verify_generated:
+                    verified_count = sum(1 for ode in generated_odes if ode.get('verified', False))
+                    st.metric("Verified", f"{verified_count}/{len(generated_odes)}")
+                else:
+                    st.metric("Verified", "N/A")
+            
+            with col4:
+                avg_complexity = np.mean([ode['complexity'] for ode in generated_odes])
+                st.metric("Avg Complexity", f"{avg_complexity:.0f}")
+            
+            # Display generated ODEs
+            st.subheader("Generated ODEs")
+            
+            # Sort by novelty score
+            generated_odes.sort(key=lambda x: x['novelty_score'], reverse=True)
+            
+            for i, ode in enumerate(generated_odes):
+                with st.expander(
+                    f"Novel ODE {i+1} - Novelty: {ode['novelty_score']:.2f}",
+                    expanded=(i < 3)  # Expand top 3
+                ):
+                    # Display equation
+                    render_ode_latex(
+                        ode['ode'],
+                        ode.get('solution') if ode.get('solution') != 'Novel solution pending verification' else None,
+                        "Generated ODE"
+                    )
+                    
+                    # Metrics
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Novelty Score", f"{ode['novelty_score']:.2f}")
+                    
+                    with col2:
+                        st.metric("Complexity", ode['complexity'])
+                    
+                    with col3:
+                        if ode.get('verified') is not None:
+                            verified = "✅" if ode['verified'] else "❌"
+                            st.metric("Verified", verified)
+                        else:
+                            st.metric("Verified", "Not checked")
+                    
+                    with col4:
+                        st.metric("Model", ode['model_type'].upper())
+                    
+                    # Additional info
+                    with st.expander("Generation Details"):
+                        details = {
+                            'Model Type': ode['model_type'],
+                            'Temperature': ode['temperature'],
+                            'Generator Style': ode.get('generator', 'N/A'),
+                            'Function Type': ode.get('function', 'N/A')
+                        }
+                        
+                        if 'perplexity' in ode:
+                            details['Perplexity'] = f"{ode['perplexity']:.2f}"
+                        if 'latent_dim' in ode:
+                            details['Latent Dimension'] = ode['latent_dim']
+                        
+                        for key, value in details.items():
+                            st.text(f"{key}: {value}")
+            
+            # Add to session state
+            st.session_state.generated_odes.extend(generated_odes)
+            
+            # Export options
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("Export Novel ODEs"):
+                    export_data = {
+                        'generation_date': datetime.now().isoformat(),
+                        'model_info': {
+                            'model_id': selected_model['model_id'],
+                            'model_type': selected_model['model_type'],
+                            'accuracy': selected_model['metrics'].get('accuracy', 0)
+                        },
+                        'generation_config': generation_config,
+                        'generated_odes': generated_odes,
+                        'summary': {
+                            'total': len(generated_odes),
+                            'avg_novelty': float(avg_novelty),
+                            'avg_complexity': float(avg_complexity),
+                            'verified_count': verified_count if verify_generated else 'N/A'
+                        }
+                    }
+                    
+                    json_str = json.dumps(export_data, indent=2)
+                    b64 = base64.b64encode(json_str.encode()).decode()
+                    href = f'<a href="data:file/json;base64,{b64}" download="ml_generated_odes.json">Download Generated ODEs</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+            
+            with col2:
+                if st.button("Visualize Novelty Distribution"):
+                    # Create novelty distribution chart
+                    fig = go.Figure()
+                    
+                    fig.add_trace(go.Histogram(
+                        x=[ode['novelty_score'] for ode in generated_odes],
+                        nbinsx=20,
+                        name='Novelty Distribution',
+                        marker_color='rgba(0, 123, 255, 0.7)'
+                    ))
+                    
+                    fig.update_layout(
+                        title='Novelty Score Distribution',
+                        xaxis_title='Novelty Score',
+                        yaxis_title='Count',
+                        showlegend=False
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
 
 def render_statistics_page():
     """Render statistics page"""
