@@ -1,197 +1,88 @@
+# requirements.txt - Production Ready for ODE Generation System
 
-# ODE Master Generator - Complete Requirements
 # ============================================
-
-# Core Mathematical and Scientific Computing
-# ------------------------------------------
+# Core Scientific Computing
+# ============================================
 numpy==1.24.3
-scipy==1.11.1
-sympy==1.12
 pandas==2.0.3
+sympy==1.12
+scipy==1.11.1
 
-# Machine Learning and Deep Learning
-# ----------------------------------
+# ============================================
+# Machine Learning & Deep Learning
+# ============================================
 torch==2.0.1
 scikit-learn==1.3.0
 transformers==4.31.0
-einops==0.6.1
-accelerate==0.23.0
 
-# API and Web Framework
-# ---------------------
+# ============================================
+# Web Framework & API
+# ============================================
 fastapi==0.100.0
 uvicorn[standard]==0.23.1
 pydantic==2.1.1
 python-multipart==0.0.6
 aiofiles==23.1.0
-httpx==0.24.1
 requests==2.31.0
-aiohttp==3.8.5
 
+# ============================================
 # Streamlit GUI
-# -------------
+# ============================================
 streamlit==1.25.0
-streamlit-ace==0.1.1
 
-# Data Processing and Storage
-# ---------------------------
+# ============================================
+# Data Processing & Storage
+# ============================================
 pyarrow==12.0.1
 openpyxl==3.1.2
-xlsxwriter==3.1.2
-h5py==3.9.0
 dill==0.3.7
-pickle5==0.0.12
 
-# Database and Caching
-# -------------------
-redis==4.6.0
-aioredis==2.0.1
-
-# Visualization and Plotting
-# --------------------------
+# ============================================
+# Visualization
+# ============================================
 matplotlib==3.7.2
 seaborn==0.12.2
 plotly==5.15.0
-bokeh==3.2.1
-altair==5.0.1
 wordcloud==1.9.2
 
-# Monitoring and Metrics
-# ----------------------
+# ============================================
+# Database & Caching
+# ============================================
+redis==4.6.0
+
+# ============================================
+# Monitoring & Metrics
+# ============================================
 prometheus-client==0.17.1
 psutil==5.9.5
 
-# Dash (for monitoring dashboard)
-# -------------------------------
-dash==2.11.1
-dash-bootstrap-components==1.4.2
-dash-core-components==2.0.0
-dash-html-components==2.0.0
-dash-table==5.0.0
-
-# Configuration and Utilities
-# ---------------------------
+# ============================================
+# Configuration & Utilities
+# ============================================
 pyyaml==6.0.1
 python-dotenv==1.0.0
-click==8.1.6
 tqdm==4.65.0
-colorama==0.4.6
-tabulate==0.9.0
 
+# ============================================
 # Network Analysis
-# ----------------
+# ============================================
 networkx==3.1
 
-# Testing and Development
-# -----------------------
+# ============================================
+# Testing
+# ============================================
 pytest==7.4.0
 pytest-asyncio==0.21.1
-pytest-cov==4.1.0
 hypothesis==6.82.0
 
-# Documentation
-# -------------
-sphinx==7.1.2
-sphinx-rtd-theme==1.3.0
-
-# Jupyter Support (optional)
-# --------------------------
-jupyter==1.0.0
-jupyterlab==4.0.3
-ipykernel==6.25.0
-ipywidgets==8.1.0
-
-# Image Processing (for plots)
-# ----------------------------
-Pillow==10.0.0
-
-# Additional ML Utilities
-# -----------------------
-tokenizers==0.13.3
-datasets==2.14.0
-evaluate==0.4.0
-
-# CORS and Security
-# -----------------
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-multipart==0.0.6
-
+# ============================================
 # Async Support
-# -------------
-asyncio==3.4.3
-nest-asyncio==1.5.7
+# ============================================
+aiohttp==3.8.5
+asyncio-throttle==1.0.2
 
-# File Handling
-# -------------
-chardet==5.2.0
-python-magic==0.4.27
-
-# Compression
-# -----------
-py7zr==0.20.5
-
-# CLI Tools
-# ---------
-typer==0.9.0
-rich==13.5.2
-
-# Environment Management
-# ----------------------
-python-decouple==3.8
-
-# Time and Date
-# -------------
-python-dateutil==2.8.2
-pytz==2023.3
-
-# Math Extensions
-# ---------------
-mpmath==1.3.0
-
-# Parallel Processing
-# -------------------
+# ============================================
+# Additional ML Support
+# ============================================
 joblib==1.3.1
-multiprocess==0.70.15
-
-# Web Scraping (if needed for docs)
-# ---------------------------------
-beautifulsoup4==4.12.2
-lxml==4.9.3
-
-# API Documentation
-# -----------------
-flasgger==0.9.7.1
-
-# Logging
-# -------
-loguru==0.7.0
-
-# Code Quality (optional)
-# -----------------------
-black==23.7.0
-flake8==6.1.0
-mypy==1.4.1
-isort==5.12.0
-
-# Performance Profiling (optional)
-# --------------------------------
-memory-profiler==0.61.0
-line-profiler==4.0.3
-
-# ============================================
-# Platform-Specific Requirements
-# ============================================
-
-# For Windows users, you might need:
-# pywin32==306 ; platform_system == "Windows"
-
-# For Unix systems:
-# uvloop==0.17.0 ; platform_system != "Windows"
-
-# ============================================
-# Version Constraints
-# ============================================
-
-# Python version requirement (add to runtime.txt)
-# python>=3.8,<3.12
+threadpoolctl==3.2.0
