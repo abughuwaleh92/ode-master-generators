@@ -20,7 +20,7 @@ import os
 
 # Page configuration
 st.set_page_config(
-    page_title="ODE Master Generator",
+    page_title="ODE Master Generator by Mohammad Abu Ghuwaleh",
     page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded"
