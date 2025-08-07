@@ -1584,7 +1584,7 @@ def render_analysis():
             xaxis_title='Complexity Score',
         yaxis_title='Count'
        )
-       st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
    
    # Verification analysis
    if 'verified' in df and 'generator' in df:
