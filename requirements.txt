@@ -1,4 +1,4 @@
-# requirements.txt - Production Ready for ODE Generation System
+# requirements.txt 
 
 # ============================================
 # Core Scientific Computing
