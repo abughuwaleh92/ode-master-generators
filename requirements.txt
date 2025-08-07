@@ -86,3 +86,11 @@ asyncio-throttle==1.0.2
 # ============================================
 joblib==1.3.1
 threadpoolctl==3.2.0
+# PyTorch and related packages - ensure compatibility
+torch>=1.11.0
+torchvision>=0.12.0
+torchaudio>=0.11.0
+
+# Transformers and dependencies
+transformers>=4.21.0
+safetensors>=0.3.0
