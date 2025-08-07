@@ -299,6 +299,70 @@ class ODEAPIClient:
             
         except Exception as e:
             return {'success': False, 'error': str(e)}
+    
+    def train_model(self, dataset: str, model_type: str, epochs: int, config: Dict) -> Dict:
+        """Train ML model on ODE dataset"""
+        payload = {
+            'dataset': dataset,
+            'model_type': model_type,
+            'epochs': epochs,
+            'batch_size': config.get('batch_size', 32),
+            'learning_rate': config.get('learning_rate', 0.001),
+            'early_stopping': config.get('early_stopping', True),
+            'config': config
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/v1/ml/train",
+                json=payload,
+                headers=self.headers,
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            st.error(f"ML Training Error: {str(e)}")
+            return None
+    
+    def generate_with_ml(self, model_path: str, n_samples: int, temperature: float = 0.8, **kwargs) -> Dict:
+        """Generate ODEs using trained ML model"""
+        payload = {
+            'model_path': model_path,
+            'n_samples': n_samples,
+            'temperature': temperature
+        }
+        
+        # Add any additional parameters
+        for key, value in kwargs.items():
+            if value is not None:
+                payload[key] = value
+        
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/v1/ml/generate",
+                json=payload,
+                headers=self.headers,
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            st.error(f"ML Generation Error: {str(e)}")
+            return None
+    
+    def get_models(self) -> Dict:
+        """Get list of available ML models"""
+        try:
+            response = requests.get(
+                f"{self.base_url}/api/v1/models",
+                headers=self.headers,
+                timeout=10
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            return {'models': [], 'error': str(e)}
 
 # Initialize API client
 api_client = ODEAPIClient(API_BASE_URL, API_KEY)
