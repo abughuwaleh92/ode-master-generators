@@ -1,15 +1,6 @@
 # scripts/production_server.py
 """
 Production API server for ODE generation and verification with ML integration
-
-Benefits:
-- RESTful API for ODE operations
-- Async processing for scalability
-- Rate limiting and authentication
-- Real-time monitoring
-- API documentation
-- ML model integration
-- Advanced analysis capabilities
 """
 
 import os
@@ -31,8 +22,6 @@ from prometheus_client import Counter, Histogram, Gauge, generate_latest
 import time
 import numpy as np
 from enum import Enum
-import torch
-import pickle
 import sympy as sp
 import pandas as pd
 import logging
@@ -40,31 +29,39 @@ import logging
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import with correct names
+# Import core components (always available)
 from pipeline.generator import ODEDatasetGenerator
 from verification.verifier import ODEVerifier
 from utils.config import ConfigManager
 from core.types import GeneratorType, VerificationMethod, ODEInstance
 from core.functions import AnalyticFunctionLibrary
 
-# Import ML pipeline components
-from ml_pipeline.models import (
-    ODEPatternNet, 
-    ODETransformer, 
-    ODEVAE,
-    ODELanguageModel,
-    get_model
-)
-from ml_pipeline.train_ode_generator import ODEGeneratorTrainer, ODEDataset
-from ml_pipeline.utils import (
-    prepare_ml_dataset,
-    load_pretrained_model, 
-    generate_novel_odes,
-    extract_ml_features,
-    create_ode_tokenizer,
-    analyze_generation_diversity
-)
-from ml_pipeline.evaluation import ODEEvaluator, NoveltyDetector
+# Try to import ML components
+ML_AVAILABLE = True
+try:
+    import torch
+    import sklearn
+    from ml_pipeline.models import (
+        ODEPatternNet, 
+        ODETransformer, 
+        ODEVAE,
+        ODELanguageModel,
+        get_model
+    )
+    from ml_pipeline.train_ode_generator import ODEGeneratorTrainer, ODEDataset
+    from ml_pipeline.utils import (
+        prepare_ml_dataset,
+        load_pretrained_model, 
+        generate_novel_odes,
+        extract_ml_features,
+        create_ode_tokenizer,
+        analyze_generation_diversity
+    )
+    from ml_pipeline.evaluation import ODEEvaluator, NoveltyDetector
+except ImportError as e:
+    print(f"Warning: ML dependencies not available: {e}")
+    print("ML features will be disabled. Install scikit-learn, torch, and transformers to enable ML features.")
+    ML_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
