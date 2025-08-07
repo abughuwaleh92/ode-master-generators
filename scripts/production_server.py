@@ -761,12 +761,22 @@ async def process_ml_training_job(job_id: str, request: MLTrainingRequest):
         # Simulate training progress
         for epoch in range(request.epochs):
             progress = (epoch / request.epochs) * 100
+            
+            # ADD THIS SECTION - Calculate current metrics for live updates
+            current_metrics = {
+                'loss': 0.5 * (1 - epoch/request.epochs) + 0.05,  # Simulated decreasing loss
+                'accuracy': 0.5 + 0.45 * (epoch/request.epochs),  # Simulated increasing accuracy
+                'val_loss': 0.6 * (1 - epoch/request.epochs) + 0.08,
+                'val_accuracy': 0.45 + 0.47 * (epoch/request.epochs)
+            }
+            
             await job_manager.update_job(job_id, {
                 "progress": progress,
                 "metadata": {
                     "current_epoch": epoch + 1,
                     "total_epochs": request.epochs,
-                    "status": f"Training epoch {epoch + 1}/{request.epochs}"
+                    "status": f"Training epoch {epoch + 1}/{request.epochs}",
+                    "current_metrics": current_metrics  # ADD THIS LINE
                 }
             })
             
