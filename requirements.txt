@@ -54,3 +54,4 @@ requests
 pydantic
 streamlit-ace
 networkx
+torch
