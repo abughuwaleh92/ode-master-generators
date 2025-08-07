@@ -1,36 +1,24 @@
-"""
-ODE Master Generator - Production GUI
-Real data only - No mock/demo data
-Configured for Railway deployment
-"""
-
 import streamlit as st
+import requests
+import json
 import pandas as pd
 import numpy as np
 import plotly.graph_objs as go
 import plotly.express as px
-from plotly.subplots import make_subplots
-import json
-import requests
+from datetime import datetime
+import time
+import base64
+from io import BytesIO
+import sympy as sp
+from sympy import symbols, Function, dsolve, Eq
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 import asyncio
 import aiohttp
-from datetime import datetime, timedelta
-import time
-from pathlib import Path
-import sympy as sp
-from io import StringIO
-import base64
-import zipfile
-import tempfile
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 import os
-import logging
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Configure Streamlit
+# Page configuration
 st.set_page_config(
     page_title="ODE Master Generator",
     page_icon="🔬",
@@ -38,1564 +26,1212 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Custom CSS for better UI
 st.markdown("""
 <style>
-    .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
-        font-size: 18px;
+    .stApp {
+        background-color: #f0f2f6;
+    }
+    .main-header {
+        background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%);
+        padding: 2rem;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        margin-bottom: 2rem;
     }
     .metric-card {
-        background-color: #f0f2f6;
-        padding: 20px;
+        background: white;
+        padding: 1.5rem;
         border-radius: 10px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        margin: 10px 0;
+        text-align: center;
+        margin: 0.5rem;
+    }
+    .ode-card {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin: 1rem 0;
     }
     .success-box {
         background-color: #d4edda;
-        border-color: #c3e6cb;
-        color: #155724;
-        padding: 15px;
+        border: 1px solid #c3e6cb;
+        padding: 1rem;
         border-radius: 5px;
-        margin: 10px 0;
+        color: #155724;
     }
     .error-box {
         background-color: #f8d7da;
-        border-color: #f5c6cb;
-        color: #721c24;
-        padding: 15px;
+        border: 1px solid #f5c6cb;
+        padding: 1rem;
         border-radius: 5px;
-        margin: 10px 0;
+        color: #721c24;
     }
-    .stButton > button {
-        background-color: #4CAF50;
-        color: white;
-        font-weight: bold;
-    }
-    .stButton > button:hover {
-        background-color: #45a049;
+    .info-box {
+        background-color: #d1ecf1;
+        border: 1px solid #bee5eb;
+        padding: 1rem;
+        border-radius: 5px;
+        color: #0c5460;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Environment configuration for Railway
-API_URL = os.getenv('ODE_API_URL', 'https://your-api.railway.app')
-API_KEY = os.getenv('ODE_API_KEY', '')
+# API Configuration
+API_BASE_URL = os.getenv('API_BASE_URL', 'https://your-api.railway.app')
+API_KEY = os.getenv('API_KEY', 'your-api-key')
 
 # Initialize session state
-if 'api_key' not in st.session_state:
-    st.session_state.api_key = API_KEY
-if 'api_url' not in st.session_state:
-    st.session_state.api_url = API_URL
 if 'generated_odes' not in st.session_state:
     st.session_state.generated_odes = []
 if 'current_job_id' not in st.session_state:
     st.session_state.current_job_id = None
-if 'api_connected' not in st.session_state:
-    st.session_state.api_connected = False
+if 'trained_models' not in st.session_state:
+    st.session_state.trained_models = []
+if 'analysis_results' not in st.session_state:
+    st.session_state.analysis_results = None
 
-class ODEProductionGUI:
-    """Production GUI for ODE Master Generator - Real data only"""
+class ODEAPIClient:
+    """API client for ODE generation system"""
     
-    def __init__(self):
-        self.api_headers = {'X-API-Key': st.session_state.api_key}
-        
-    def main(self):
-        """Main application entry point"""
-        st.title("🔬 ODE Master Generator")
-        st.markdown("### Production System - Connected to Railway API")
-        
-        # Check API connection on startup
-        if not st.session_state.api_connected:
-            self.check_and_setup_api()
-        
-        # Sidebar navigation
-        with st.sidebar:
-            st.header("Navigation")
-            
-            # API connection status
-            if st.session_state.api_connected:
-                st.success(f"✅ Connected to API")
-                st.caption(f"Endpoint: {st.session_state.api_url}")
-            else:
-                st.error("❌ API Not Connected")
-                if st.button("Retry Connection"):
-                    self.check_and_setup_api()
-                    st.experimental_rerun()
-            
-            st.markdown("---")
-            
-            # Only show navigation if API is connected
-            if st.session_state.api_connected:
-                page = st.radio(
-                    "Select Module",
-                    ["🏠 Dashboard", "⚡ Generate ODEs", "✓ Verify ODEs", 
-                     "📊 Analyze Dataset", "🤖 ML Pipeline", "📈 System Monitor",
-                     "🔍 ODE Explorer", "⚙️ Settings"]
-                )
-            else:
-                page = "⚙️ Settings"
-        
-        # Route to appropriate page
-        if not st.session_state.api_connected and page != "⚙️ Settings":
-            st.error("Please configure API connection in Settings first.")
-            page = "⚙️ Settings"
-            
-        if page == "🏠 Dashboard":
-            self.show_dashboard()
-        elif page == "⚡ Generate ODEs":
-            self.show_generation_page()
-        elif page == "✓ Verify ODEs":
-            self.show_verification_page()
-        elif page == "📊 Analyze Dataset":
-            self.show_analysis_page()
-        elif page == "🤖 ML Pipeline":
-            self.show_ml_page()
-        elif page == "📈 System Monitor":
-            self.show_monitor_page()
-        elif page == "🔍 ODE Explorer":
-            self.show_explorer_page()
-        elif page == "⚙️ Settings":
-            self.show_settings_page()
+    def __init__(self, base_url: str, api_key: str):
+        self.base_url = base_url
+        self.headers = {
+            'X-API-Key': api_key,
+            'Content-Type': 'application/json'
+        }
     
-    def check_and_setup_api(self):
-        """Check API connection and setup"""
+    def generate_odes(self, generator: str, function: str, parameters: Dict, count: int = 1, verify: bool = True) -> Dict:
+        """Generate ODEs using the API"""
+        payload = {
+            'generator': generator,
+            'function': function,
+            'parameters': parameters,
+            'count': count,
+            'verify': verify
+        }
+        
         try:
-            # Try to connect to API
-            response = requests.get(
-                f"{st.session_state.api_url}/health",
-                headers=self.api_headers,
-                timeout=5
+            response = requests.post(
+                f"{self.base_url}/api/v1/generate",
+                json=payload,
+                headers=self.headers
             )
-            
-            if response.status_code == 200:
-                st.session_state.api_connected = True
-                health_data = response.json()
-                logger.info(f"API connected successfully: {health_data}")
-            else:
-                st.session_state.api_connected = False
-                logger.error(f"API connection failed with status: {response.status_code}")
+            response.raise_for_status()
+            return response.json()
         except Exception as e:
-            st.session_state.api_connected = False
-            logger.error(f"API connection error: {str(e)}")
+            st.error(f"API Error: {str(e)}")
+            return None
     
-    def show_dashboard(self):
-        """Dashboard with real statistics from API"""
-        st.header("📊 System Dashboard")
+    def get_job_status(self, job_id: str) -> Dict:
+        """Get job status"""
+        try:
+            response = requests.get(
+                f"{self.base_url}/api/v1/jobs/{job_id}",
+                headers=self.headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            st.error(f"API Error: {str(e)}")
+            return None
+    
+    def verify_ode(self, ode: str, solution: str) -> Dict:
+        """Verify ODE solution"""
+        payload = {
+            'ode': ode,
+            'solution': solution,
+            'method': 'substitution'
+        }
         
-        # Fetch real statistics
-        with st.spinner("Loading dashboard data..."):
-            try:
-                stats_response = requests.get(
-                    f"{st.session_state.api_url}/api/v1/stats",
-                    headers=self.api_headers,
-                    timeout=10
-                )
-                
-                if stats_response.status_code == 200:
-                    stats = stats_response.json()
-                else:
-                    st.error(f"Failed to fetch statistics: {stats_response.status_code}")
-                    return
-                    
-            except Exception as e:
-                st.error(f"Error fetching statistics: {str(e)}")
-                return
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/v1/verify",
+                json=payload,
+                headers=self.headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            st.error(f"API Error: {str(e)}")
+            return None
+    
+    def get_generators(self) -> Dict:
+        """Get available generators"""
+        try:
+            response = requests.get(
+                f"{self.base_url}/api/v1/generators",
+                headers=self.headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            st.error(f"API Error: {str(e)}")
+            return {'all': []}
+    
+    def get_functions(self) -> Dict:
+        """Get available functions"""
+        try:
+            response = requests.get(
+                f"{self.base_url}/api/v1/functions",
+                headers=self.headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            st.error(f"API Error: {str(e)}")
+            return {'functions': []}
+    
+    def get_statistics(self) -> Dict:
+        """Get API statistics"""
+        try:
+            response = requests.get(
+                f"{self.base_url}/api/v1/stats",
+                headers=self.headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            st.error(f"API Error: {str(e)}")
+            return {}
+    
+    def analyze_dataset(self, ode_list: List[str]) -> Dict:
+        """Analyze ODE dataset"""
+        payload = {
+            'ode_list': ode_list,
+            'analysis_type': 'comprehensive'
+        }
         
-        # Display real metrics
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/v1/analyze",
+                json=payload,
+                headers=self.headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            st.error(f"API Error: {str(e)}")
+            return None
+    
+    def train_model(self, dataset: str, model_type: str, epochs: int, config: Dict) -> Dict:
+        """Train ML model"""
+        payload = {
+            'dataset': dataset,
+            'model_type': model_type,
+            'epochs': epochs,
+            'config': config
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/v1/ml/train",
+                json=payload,
+                headers=self.headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            st.error(f"API Error: {str(e)}")
+            return None
+    
+    def generate_with_ml(self, model_path: str, n_samples: int, temperature: float = 0.8) -> Dict:
+        """Generate ODEs using ML model"""
+        payload = {
+            'model_path': model_path,
+            'n_samples': n_samples,
+            'temperature': temperature
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/v1/ml/generate",
+                json=payload,
+                headers=self.headers
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            st.error(f"API Error: {str(e)}")
+            return None
+
+# Initialize API client
+api_client = ODEAPIClient(API_BASE_URL, API_KEY)
+
+def render_ode_latex(ode_latex: str, solution_latex: str = None):
+    """Render ODE and solution using LaTeX"""
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.markdown("**ODE Equation:**")
+        st.latex(ode_latex)
+    
+    if solution_latex:
+        with col2:
+            st.markdown("**Solution:**")
+            st.latex(solution_latex)
+
+def plot_solution(solution_str: str, x_range: tuple = (-5, 5), params: Dict = None):
+    """Plot ODE solution"""
+    try:
+        # Parse solution
+        x = symbols('x')
+        solution_expr = sp.sympify(solution_str)
+        
+        # Substitute parameters if provided
+        if params:
+            for param, value in params.items():
+                solution_expr = solution_expr.subs(param, value)
+        
+        # Create numerical function
+        solution_func = sp.lambdify(x, solution_expr, 'numpy')
+        
+        # Generate plot data
+        x_vals = np.linspace(x_range[0], x_range[1], 1000)
+        y_vals = solution_func(x_vals)
+        
+        # Create plotly figure
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=x_vals,
+            y=y_vals,
+            mode='lines',
+            name='Solution',
+            line=dict(color='blue', width=2)
+        ))
+        
+        fig.update_layout(
+            title='ODE Solution Plot',
+            xaxis_title='x',
+            yaxis_title='y(x)',
+            template='plotly_white',
+            height=400
+        )
+        
+        return fig
+    except Exception as e:
+        st.error(f"Error plotting solution: {str(e)}")
+        return None
+
+def main():
+    # Header
+    st.markdown("""
+    <div class="main-header">
+        <h1>🔬 ODE Master Generator System</h1>
+        <p>Advanced Ordinary Differential Equation Generation, Verification & Analysis Platform</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Sidebar navigation
+    st.sidebar.title("Navigation")
+    page = st.sidebar.radio(
+        "Select Module",
+        ["🏠 Dashboard", "⚡ Generate ODEs", "✅ Verify Solutions", 
+         "📊 Analysis Suite", "🤖 ML Training", "🧪 ML Generation", 
+         "📈 Statistics", "⚙️ Settings"]
+    )
+    
+    if page == "🏠 Dashboard":
+        render_dashboard()
+    elif page == "⚡ Generate ODEs":
+        render_generation_page()
+    elif page == "✅ Verify Solutions":
+        render_verification_page()
+    elif page == "📊 Analysis Suite":
+        render_analysis_page()
+    elif page == "🤖 ML Training":
+        render_ml_training_page()
+    elif page == "🧪 ML Generation":
+        render_ml_generation_page()
+    elif page == "📈 Statistics":
+        render_statistics_page()
+    elif page == "⚙️ Settings":
+        render_settings_page()
+
+def render_dashboard():
+    """Render main dashboard"""
+    st.title("System Dashboard")
+    
+    # Get statistics
+    stats = api_client.get_statistics()
+    
+    if stats:
+        # Display metrics
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric(
-                "Total Generated",
-                stats.get('total_generated', 0),
-                delta=f"Active: {stats.get('active_jobs', 0)}"
-            )
+            st.markdown("""
+            <div class="metric-card">
+                <h3>System Status</h3>
+                <h1>🟢 {}</h1>
+            </div>
+            """.format(stats.get('status', 'Unknown').upper()), unsafe_allow_html=True)
         
         with col2:
-            st.metric(
-                "Total Verified",
-                stats.get('total_verified', 0)
-            )
+            st.markdown("""
+            <div class="metric-card">
+                <h3>Total Generated</h3>
+                <h1>{:,}</h1>
+            </div>
+            """.format(stats.get('total_generated', 0)), unsafe_allow_html=True)
         
         with col3:
-            st.metric(
-                "Available Generators",
-                stats.get('available_generators', 0)
-            )
+            st.markdown("""
+            <div class="metric-card">
+                <h3>Active Jobs</h3>
+                <h1>{}</h1>
+            </div>
+            """.format(stats.get('active_jobs', 0)), unsafe_allow_html=True)
         
         with col4:
-            st.metric(
-                "Available Functions", 
-                stats.get('available_functions', 0)
-            )
-        
-        st.markdown("---")
-        
-        # System Status
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("🖥️ API Status")
-            status_data = {
-                "Status": stats.get('status', 'Unknown'),
-                "Redis": "✅ Connected" if stats.get('redis_available', False) else "❌ Disconnected",
-                "Generators": "✅ Loaded" if stats.get('generators_available', False) else "❌ Not loaded",
-                "Uptime": f"{stats.get('uptime', 0):.1f} seconds" if 'uptime' in stats else "N/A"
-            }
-            
-            for key, value in status_data.items():
-                st.write(f"**{key}:** {value}")
-        
-        with col2:
-            st.subheader("📊 Job Statistics")
-            
-            if 'job_statistics' in stats:
-                job_stats = stats['job_statistics']
-                
-                # Create pie chart
-                fig = go.Figure(data=[go.Pie(
-                    labels=['Completed', 'Failed', 'Running', 'Pending'],
-                    values=[
-                        job_stats.get('completed', 0),
-                        job_stats.get('failed', 0),
-                        job_stats.get('running', 0),
-                        job_stats.get('pending', 0)
-                    ],
-                    marker_colors=['#28a745', '#dc3545', '#ffc107', '#6c757d']
-                )])
-                
-                fig.update_layout(height=300, showlegend=True)
-                st.plotly_chart(fig, use_container_width=True)
-        
-        # Recent Jobs
-        st.subheader("📋 Recent Jobs")
-        
-        try:
-            jobs_response = requests.get(
-                f"{st.session_state.api_url}/api/v1/jobs?limit=10",
-                headers=self.api_headers,
-                timeout=10
-            )
-            
-            if jobs_response.status_code == 200:
-                recent_jobs = jobs_response.json()
-                
-                if recent_jobs:
-                    job_data = []
-                    for job in recent_jobs:
-                        job_data.append({
-                            'Job ID': job['job_id'][:8] + '...',
-                            'Status': job['status'],
-                            'Progress': f"{job.get('progress', 0):.0f}%",
-                            'Created': job.get('created_at', '')[:19],
-                            'Type': job.get('metadata', {}).get('type', 'generation')
-                        })
-                    
-                    df = pd.DataFrame(job_data)
-                    st.dataframe(df, use_container_width=True)
-                else:
-                    st.info("No recent jobs found")
-            else:
-                st.error(f"Failed to fetch jobs: {jobs_response.status_code}")
-                
-        except Exception as e:
-            st.error(f"Error fetching recent jobs: {str(e)}")
-    
-    def show_generation_page(self):
-        """ODE Generation page"""
-        st.header("⚡ ODE Generation")
-        
-        # Fetch available generators and functions
-        generators = self.get_available_generators()
-        functions = self.get_available_functions()
-        
-        if not generators or not functions:
-            st.error("Failed to load generators or functions from API")
-            return
-        
-        tab1, tab2, tab3 = st.tabs(["Single Generation", "Batch Generation", "Stream Generation"])
-        
-        with tab1:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                generator = st.selectbox("Select Generator", generators)
-                function = st.selectbox("Select Function", functions)
-                
-                st.subheader("Parameters")
-                params = {}
-                params['alpha'] = st.slider("Alpha (α)", 0.0, 2.0, 1.0, 0.1)
-                params['beta'] = st.slider("Beta (β)", 0.1, 2.0, 1.0, 0.1)
-                params['M'] = st.slider("M", -1.0, 1.0, 0.0, 0.1)
-                
-                if generator.startswith('N'):
-                    params['q'] = st.slider("q (power)", 2, 5, 2)
-                    params['v'] = st.slider("v (power)", 2, 5, 3)
-                
-                if generator in ['L4', 'N6']:
-                    params['a'] = st.slider("a (pantograph)", 2, 5, 2)
-                
-                verify = st.checkbox("Verify solution", value=True)
-                
-                if st.button("🚀 Generate ODE", key="gen_single"):
-                    self.generate_single_ode(generator, function, params, verify)
-            
-            with col2:
-                if st.session_state.generated_odes:
-                    latest_ode = st.session_state.generated_odes[-1]
-                    
-                    st.subheader("Generated ODE")
-                    
-                    # Display equation
-                    if 'ode_latex' in latest_ode:
-                        st.markdown("**Equation:**")
-                        st.latex(latest_ode['ode_latex'])
-                    elif 'ode' in latest_ode:
-                        st.markdown("**Equation:**")
-                        st.code(latest_ode['ode'])
-                    
-                    # Display solution
-                    if 'solution_latex' in latest_ode:
-                        st.markdown("**Solution:**")
-                        st.latex(latest_ode['solution_latex'])
-                    elif 'solution' in latest_ode:
-                        st.markdown("**Solution:**")
-                        st.code(latest_ode['solution'])
-                    
-                    # Verification status
-                    if latest_ode.get('verified'):
-                        confidence = latest_ode.get('verification_confidence', 0)
-                        st.success(f"✅ Verified (Confidence: {confidence:.2%})")
-                    else:
-                        st.error("❌ Not verified")
-                    
-                    # Properties
-                    with st.expander("ODE Properties"):
-                        props = latest_ode.get('properties', {})
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.metric("Complexity", latest_ode.get('complexity', 'N/A'))
-                            st.metric("Operations", props.get('operation_count', 'N/A'))
-                        with col2:
-                            st.metric("Atoms", props.get('atom_count', 'N/A'))
-                            st.metric("Symbols", props.get('symbol_count', 'N/A'))
-                    
-                    # Download button
-                    ode_json = json.dumps(latest_ode, indent=2)
-                    st.download_button(
-                        "📥 Download ODE JSON",
-                        data=ode_json,
-                        file_name=f"ode_{latest_ode.get('id', 'unknown')}.json",
-                        mime="application/json"
-                    )
-        
-        with tab2:
-            st.subheader("Batch Generation")
-            
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                selected_generators = st.multiselect(
-                    "Select Generators", 
-                    generators, 
-                    default=generators[:min(3, len(generators))]
-                )
-                
-                selected_functions = st.multiselect(
-                    "Select Functions", 
-                    functions, 
-                    default=functions[:min(3, len(functions))]
-                )
-                
-                samples_per_combo = st.number_input(
-                    "Samples per combination", 
-                    min_value=1, 
-                    max_value=100, 
-                    value=5
-                )
-                
-                total_odes = len(selected_generators) * len(selected_functions) * samples_per_combo
-                st.info(f"This will generate {total_odes} ODEs")
-            
-            with col2:
-                st.markdown("### Options")
-                verify_batch = st.checkbox("Verify all ODEs", value=True)
-                
-            if st.button("🚀 Start Batch Generation", key="gen_batch"):
-                if selected_generators and selected_functions:
-                    self.run_batch_generation(
-                        selected_generators, 
-                        selected_functions, 
-                        samples_per_combo,
-                        verify_batch
-                    )
-                else:
-                    st.error("Please select at least one generator and function")
-        
-        with tab3:
-            st.subheader("Real-time Stream Generation")
-            
-            stream_generator = st.selectbox("Generator", generators, key="stream_gen")
-            stream_function = st.selectbox("Function", functions, key="stream_func")
-            stream_count = st.slider("Number of ODEs", 5, 50, 10)
-            
-            if st.button("🌊 Start Streaming", key="start_stream"):
-                container = st.empty()
-                self.stream_odes(stream_generator, stream_function, stream_count, container)
-    
-    def show_verification_page(self):
-        """ODE Verification page"""
-        st.header("✓ ODE Verification")
-        
-        tab1, tab2 = st.tabs(["Manual Verification", "Batch Verification"])
-        
-        with tab1:
-            st.subheader("Verify Custom ODE")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                ode_input = st.text_area(
-                    "Enter ODE equation",
-                    value="y''(x) + y(x) = sin(x)",
-                    height=100,
-                    help="Use SymPy syntax: y(x) for function, y'(x) for first derivative"
-                )
-                
-                solution_input = st.text_area(
-                    "Enter solution",
-                    value="C1*cos(x) + C2*sin(x) - x*cos(x)/2",
-                    height=100,
-                    help="Use C1, C2 for arbitrary constants"
-                )
-                
-                method = st.selectbox(
-                    "Verification method",
-                    ["substitution", "numerical", "checkodesol"]
-                )
-                
-                if st.button("🔍 Verify", key="verify_manual"):
-                    self.verify_ode_manual(ode_input, solution_input, method)
-            
-            with col2:
-                st.markdown("### Verification Guide")
-                st.info("""
-                **Syntax Examples:**
-                - Second order: `y''(x) + 2*y'(x) + y(x) = exp(x)`
-                - Nonlinear: `(y'(x))**2 + y(x) = x**2`
-                - Pantograph: `y''(x) + y(x/2) = 0`
-                
-                **Functions:** sin, cos, exp, log, sqrt
-                **Constants:** pi, e
-                """)
-        
-        with tab2:
-            st.subheader("Batch Verification")
-            
-            uploaded_file = st.file_uploader(
-                "Upload ODE dataset (JSONL)",
-                type=['jsonl', 'json'],
-                help="Each line should be a JSON object with 'ode_symbolic' and 'solution_symbolic' fields"
-            )
-            
-            if uploaded_file:
-                st.success(f"Uploaded: {uploaded_file.name}")
-                
-                # Parse file to count ODEs
-                try:
-                    content = uploaded_file.read().decode('utf-8')
-                    lines = content.strip().split('\n')
-                    ode_count = len([l for l in lines if l.strip()])
-                    st.info(f"Found {ode_count} ODEs to verify")
-                    
-                    uploaded_file.seek(0)  # Reset file pointer
-                except:
-                    st.error("Failed to parse uploaded file")
-                    return
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    batch_method = st.selectbox(
-                        "Verification method",
-                        ["substitution", "numerical", "all"],
-                        key="batch_method"
-                    )
-                
-                with col2:
-                    include_failed = st.checkbox(
-                        "Include failed verifications in output",
-                        value=True
-                    )
-                
-                if st.button("🔍 Start Batch Verification", key="verify_batch"):
-                    self.verify_batch(uploaded_file, batch_method, include_failed)
-    
-    def show_analysis_page(self):
-        """Dataset Analysis page"""
-        st.header("📊 Dataset Analysis")
-        
-        # Request analysis job
-        st.subheader("Analyze ODE Dataset")
-        
-        analysis_type = st.selectbox(
-            "Analysis Type",
-            ["summary", "generators", "functions", "complexity", "patterns"]
-        )
-        
-        # File upload option
-        uploaded_file = st.file_uploader(
-            "Upload dataset for analysis (optional)",
-            type=['jsonl', 'json'],
-            help="Leave empty to analyze server's current dataset"
-        )
-        
-        if st.button("📊 Start Analysis"):
-            with st.spinner("Running analysis..."):
-                self.run_analysis(analysis_type, uploaded_file)
-        
-        # Display existing analysis results
-        st.markdown("---")
-        st.subheader("Previous Analysis Results")
-        
-        # Fetch completed analysis jobs
-        try:
-            jobs_response = requests.get(
-                f"{st.session_state.api_url}/api/v1/jobs?status=completed&limit=20",
-                headers=self.api_headers
-            )
-            
-            if jobs_response.status_code == 200:
-                jobs = jobs_response.json()
-                analysis_jobs = [j for j in jobs if j.get('metadata', {}).get('type') == 'analysis']
-                
-                if analysis_jobs:
-                    for job in analysis_jobs[:5]:
-                        with st.expander(f"Analysis {job['job_id'][:8]} - {job['created_at'][:19]}"):
-                            if 'results' in job and job['results']:
-                                self.display_analysis_results(job['results'])
-                            else:
-                                st.info("No results available")
-                else:
-                    st.info("No previous analysis results found")
-        except Exception as e:
-            st.error(f"Failed to fetch analysis results: {str(e)}")
-    
-    def show_ml_page(self):
-        """Machine Learning Pipeline page"""
-        st.header("🤖 Machine Learning Pipeline")
-        
-        # Check available models
-        models = self.get_available_models()
-        
-        tab1, tab2, tab3 = st.tabs(["Model Training", "Generate with ML", "Model Management"])
-        
-        with tab1:
-            st.subheader("Train New Model")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                model_type = st.selectbox(
-                    "Model Type",
-                    ["pattern_net", "transformer", "vae", "language_model"]
-                )
-                
-                dataset_source = st.radio(
-                    "Dataset Source",
-                    ["Use server dataset", "Upload custom dataset"]
-                )
-                
-                if dataset_source == "Upload custom dataset":
-                    training_file = st.file_uploader(
-                        "Upload training dataset",
-                        type=['jsonl', 'json']
-                    )
-                else:
-                    training_file = None
-                
-                st.markdown("### Training Parameters")
-                epochs = st.number_input("Epochs", min_value=1, max_value=1000, value=50)
-                batch_size = st.selectbox("Batch size", [16, 32, 64, 128], index=1)
-                learning_rate = st.number_input(
-                    "Learning rate", 
-                    min_value=0.00001, 
-                    max_value=0.1, 
-                    value=0.001, 
-                    format="%.5f"
-                )
-                
-            with col2:
-                st.markdown("### Model Configuration")
-                
-                config = {}
-                if model_type == "pattern_net":
-                    config['hidden_dims'] = st.text_input(
-                        "Hidden dimensions", 
-                        value="256,128,64"
-                    )
-                    config['dropout_rate'] = st.slider(
-                        "Dropout rate", 
-                        0.0, 0.5, 0.2
-                    )
-                elif model_type == "transformer":
-                    config['n_heads'] = st.number_input(
-                        "Attention heads", 
-                        min_value=4, 
-                        max_value=16, 
-                        value=8
-                    )
-                    config['n_layers'] = st.number_input(
-                        "Transformer layers", 
-                        min_value=2, 
-                        max_value=12, 
-                        value=6
-                    )
-                elif model_type == "vae":
-                    config['latent_dim'] = st.number_input(
-                        "Latent dimension", 
-                        min_value=16, 
-                        max_value=256, 
-                        value=64
-                    )
-                
-                early_stopping = st.checkbox("Early stopping", value=True)
-                config['early_stopping'] = early_stopping
-            
-            if st.button("🎯 Start Training", key="start_training"):
-                self.start_ml_training(
-                    model_type, epochs, batch_size, 
-                    learning_rate, config, training_file
-                )
-        
-        with tab2:
-            st.subheader("Generate ODEs with ML Model")
-            
-            if models:
-                selected_model = st.selectbox("Select Model", models)
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    n_samples = st.number_input(
-                        "Number of samples", 
-                        min_value=1, 
-                        max_value=1000, 
-                        value=10
-                    )
-                    
-                    temperature = st.slider(
-                        "Temperature", 
-                        min_value=0.1, 
-                        max_value=2.0, 
-                        value=0.8, 
-                        step=0.1,
-                        help="Lower = more conservative, Higher = more creative"
-                    )
-                    
-                    # Constraints
-                    with st.expander("Generation Constraints"):
-                        generators = self.get_available_generators()
-                        functions = self.get_available_functions()
-                        
-                        target_generator = st.selectbox(
-                            "Target generator",
-                            ["Any"] + generators
-                        )
-                        
-                        target_function = st.selectbox(
-                            "Target function",
-                            ["Any"] + functions
-                        )
-                        
-                        complexity_range = st.slider(
-                            "Complexity range",
-                            0, 1000, (50, 500)
-                        )
-                
-                with col2:
-                    st.markdown("### Generation Options")
-                    
-                    verify_generated = st.checkbox(
-                        "Verify generated ODEs", 
-                        value=True
-                    )
-                    
-                    unique_only = st.checkbox(
-                        "Unique ODEs only", 
-                        value=True
-                    )
-                    
-                if st.button("🎨 Generate with ML", key="ml_generate"):
-                    self.generate_ml_odes(
-                        selected_model, n_samples, temperature,
-                        target_generator if target_generator != "Any" else None,
-                        target_function if target_function != "Any" else None,
-                        complexity_range,
-                        verify_generated,
-                        unique_only
-                    )
-            else:
-                st.info("No trained models available. Train a model first.")
-        
-        with tab3:
-            st.subheader("Model Management")
-            
-            if models:
-                for model in models:
-                    with st.expander(f"Model: {model['name']}"):
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            st.write(f"**Type:** {model.get('metadata', {}).get('model_type', 'Unknown')}")
-                            st.write(f"**Created:** {model.get('created', 'Unknown')}")
-                        
-                        with col2:
-                            st.write(f"**Size:** {model.get('size', 0) / 1024 / 1024:.2f} MB")
-                            st.write(f"**Epochs:** {model.get('metadata', {}).get('epochs', 'Unknown')}")
-                        
-                        with col3:
-                            if st.button(f"Delete", key=f"delete_{model['name']}"):
-                                st.warning("Model deletion not implemented yet")
-                            
-                            if st.button(f"Download", key=f"download_{model['name']}"):
-                                st.info("Model download not implemented yet")
-            else:
-                st.info("No models found")
-    
-    def show_monitor_page(self):
-        """System monitoring page"""
-        st.header("📈 System Monitor")
-        
-        # Refresh controls
-        col1, col2, col3 = st.columns([1, 1, 2])
-        
-        with col1:
-            auto_refresh = st.checkbox("Auto-refresh", value=False)
-        
-        with col2:
-            refresh_interval = st.selectbox(
-                "Interval (seconds)",
-                [5, 10, 30, 60],
-                index=1
-            )
-        
-        with col3:
-            if st.button("🔄 Refresh Now"):
-                st.experimental_rerun()
-        
-        # Fetch current metrics
-        try:
-            stats_response = requests.get(
-                f"{st.session_state.api_url}/api/v1/stats",
-                headers=self.api_headers
-            )
-            
-            metrics_response = requests.get(
-                f"{st.session_state.api_url}/metrics",
-                headers=self.api_headers
-            )
-            
-            if stats_response.status_code == 200:
-                stats = stats_response.json()
-                
-                # Display metrics
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    st.metric("Active Jobs", stats.get('active_jobs', 0))
-                
-                with col2:
-                    st.metric("Total Generated", stats.get('total_generated', 0))
-                
-                with col3:
-                    st.metric("Cache Size", stats.get('cache_size', 0))
-                
-                with col4:
-                    uptime = stats.get('uptime', 0)
-                    st.metric("Uptime", f"{uptime/3600:.1f}h" if uptime > 3600 else f"{uptime/60:.1f}m")
-                
-                # Job distribution
-                if 'job_statistics' in stats:
-                    st.subheader("Job Statistics")
-                    
-                    job_stats = stats['job_statistics']
-                    
-                    # Create charts
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # Job status pie chart
-                        fig = go.Figure(data=[go.Pie(
-                            labels=['Completed', 'Failed', 'Running', 'Pending'],
-                            values=[
-                                job_stats.get('completed', 0),
-                                job_stats.get('failed', 0),
-                                job_stats.get('running', 0),
-                                job_stats.get('pending', 0)
-                            ],
-                            hole=.3
-                        )])
-                        fig.update_layout(title="Job Status Distribution")
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    with col2:
-                        # Success rate gauge
-                        total_jobs = job_stats.get('total', 1)
-                        success_rate = (job_stats.get('completed', 0) / total_jobs * 100) if total_jobs > 0 else 0
-                        
-                        fig = go.Figure(go.Indicator(
-                            mode = "gauge+number+delta",
-                            value = success_rate,
-                            domain = {'x': [0, 1], 'y': [0, 1]},
-                            title = {'text': "Success Rate %"},
-                            delta = {'reference': 90},
-                            gauge = {
-                                'axis': {'range': [None, 100]},
-                                'bar': {'color': "darkgreen"},
-                                'steps': [
-                                    {'range': [0, 50], 'color': "lightgray"},
-                                    {'range': [50, 80], 'color': "yellow"}
-                                ],
-                                'threshold': {
-                                    'line': {'color': "red", 'width': 4},
-                                    'thickness': 0.75,
-                                    'value': 90
-                                }
-                            }
-                        ))
-                        st.plotly_chart(fig, use_container_width=True)
-                
-                # Prometheus metrics if available
-                if metrics_response.status_code == 200:
-                    st.subheader("Performance Metrics")
-                    metrics_text = metrics_response.text
-                    
-                    # Parse and display key metrics
-                    if "ode_generation_total" in metrics_text:
-                        st.code(metrics_text[:500] + "...", language="text")
-            
-            else:
-                st.error(f"Failed to fetch statistics: {stats_response.status_code}")
-                
-        except Exception as e:
-            st.error(f"Error fetching metrics: {str(e)}")
-        
-        # Auto-refresh
-        if auto_refresh:
-            time.sleep(refresh_interval)
-            st.experimental_rerun()
-    
-    def show_explorer_page(self):
-        """ODE Explorer - browse generated ODEs"""
-        st.header("🔍 ODE Explorer")
-        
-        # Fetch recent ODEs from completed jobs
-        st.subheader("Recent Generated ODEs")
-        
-        # Pagination
-        page = st.number_input("Page", min_value=1, value=1)
-        per_page = st.selectbox("Items per page", [10, 25, 50], index=0)
-        
-        # Fetch completed generation jobs
-        try:
-            offset = (page - 1) * per_page
-            jobs_response = requests.get(
-                f"{st.session_state.api_url}/api/v1/jobs?status=completed&limit={per_page}&offset={offset}",
-                headers=self.api_headers
-            )
-            
-            if jobs_response.status_code == 200:
-                jobs = jobs_response.json()
-                
-                # Filter for generation jobs with results
-                ode_results = []
-                for job in jobs:
-                    if job.get('results') and isinstance(job['results'], list):
-                        for result in job['results']:
-                            if 'ode' in result:
-                                ode_results.append(result)
-                
-                if ode_results:
-                    st.success(f"Found {len(ode_results)} ODEs")
-                    
-                    # Display ODEs
-                    for i, ode in enumerate(ode_results):
-                        with st.expander(
-                            f"ODE {i+1}: {ode.get('generator', 'Unknown')} - "
-                            f"{ode.get('function', 'Unknown')}"
-                        ):
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                st.markdown("**Equation:**")
-                                if 'ode_latex' in ode:
-                                    st.latex(ode['ode_latex'])
-                                else:
-                                    st.code(ode.get('ode', 'N/A'))
-                                
-                                if 'solution_latex' in ode:
-                                    st.markdown("**Solution:**")
-                                    st.latex(ode['solution_latex'])
-                                elif 'solution' in ode:
-                                    st.markdown("**Solution:**")
-                                    st.code(ode['solution'])
-                            
-                            with col2:
-                                st.markdown("**Properties:**")
-                                props = {
-                                    'ID': ode.get('id', 'N/A'),
-                                    'Verified': '✅' if ode.get('verified') else '❌',
-                                    'Complexity': ode.get('complexity', 'N/A'),
-                                    'Generator': ode.get('generator', 'N/A'),
-                                    'Function': ode.get('function', 'N/A')
-                                }
-                                
-                                for key, value in props.items():
-                                    st.write(f"**{key}:** {value}")
-                                
-                                # Download individual ODE
-                                ode_json = json.dumps(ode, indent=2)
-                                st.download_button(
-                                    "📥 Download",
-                                    data=ode_json,
-                                    file_name=f"ode_{ode.get('id', i)}.json",
-                                    mime="application/json",
-                                    key=f"download_ode_{i}"
-                                )
-                else:
-                    st.info("No ODEs found. Generate some ODEs first!")
-            else:
-                st.error(f"Failed to fetch ODEs: {jobs_response.status_code}")
-                
-        except Exception as e:
-            st.error(f"Error fetching ODEs: {str(e)}")
-    
-    def show_settings_page(self):
-        """Settings and configuration page"""
-        st.header("⚙️ Settings")
-        
-        tab1, tab2 = st.tabs(["API Configuration", "About"])
-        
-        with tab1:
-            st.subheader("API Configuration")
-            
-            # Show current configuration
-            st.info(f"Current API URL: {st.session_state.api_url}")
-            
-            # API configuration form
-            with st.form("api_config"):
-                api_url = st.text_input(
-                    "API URL",
-                    value=st.session_state.api_url,
-                    help="Your Railway API endpoint (e.g., https://your-app.railway.app)"
-                )
-                
-                api_key = st.text_input(
-                    "API Key",
-                    value=st.session_state.api_key,
-                    type="password",
-                    help="Your API authentication key"
-                )
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    test_connection = st.form_submit_button("🔌 Test Connection")
-                
-                with col2:
-                    save_settings = st.form_submit_button("💾 Save Settings")
-            
-            if test_connection:
-                with st.spinner("Testing connection..."):
-                    try:
-                        test_headers = {'X-API-Key': api_key}
-                        response = requests.get(
-                            f"{api_url}/health",
-                            headers=test_headers,
-                            timeout=10
-                        )
-                        
-                        if response.status_code == 200:
-                            health_data = response.json()
-                            st.success("✅ Connection successful!")
-                            
-                            # Display API info
-                            st.json(health_data)
-                        else:
-                            st.error(f"❌ Connection failed: HTTP {response.status_code}")
-                            try:
-                                error_data = response.json()
-                                st.error(f"Error: {error_data}")
-                            except:
-                                st.error(f"Response: {response.text}")
-                                
-                    except requests.exceptions.Timeout:
-                        st.error("❌ Connection timeout - check if API is running")
-                    except requests.exceptions.ConnectionError:
-                        st.error("❌ Connection error - check API URL")
-                    except Exception as e:
-                        st.error(f"❌ Error: {str(e)}")
-            
-            if save_settings:
-                st.session_state.api_url = api_url
-                st.session_state.api_key = api_key
-                self.api_headers = {'X-API-Key': api_key}
-                
-                # Test the new settings
-                self.check_and_setup_api()
-                
-                if st.session_state.api_connected:
-                    st.success("✅ Settings saved and connected!")
-                    time.sleep(1)
-                    st.experimental_rerun()
-                else:
-                    st.error("❌ Settings saved but connection failed")
-            
-            # Environment variables info
-            st.markdown("---")
-            st.subheader("Environment Variables")
-            st.info("""
-            For Railway deployment, set these environment variables:
-            - `ODE_API_URL`: Your API endpoint
-            - `ODE_API_KEY`: Your API key
-            
-            This will automatically configure the connection on startup.
-            """)
-        
-        with tab2:
-            st.subheader("About ODE Master Generator")
-            
             st.markdown("""
-            ### Version 2.0.0 - Production
+            <div class="metric-card">
+                <h3>Available Generators</h3>
+                <h1>{}</h1>
+            </div>
+            """.format(stats.get('available_generators', 0)), unsafe_allow_html=True)
+        
+        # Job statistics
+        if 'job_statistics' in stats:
+            st.subheader("Job Statistics")
+            job_stats = stats['job_statistics']
             
-            This is the production GUI for the ODE Master Generator system, 
-            connected to your Railway-deployed API.
-            
-            ### Features
-            - ✅ Real-time ODE generation with exact solutions
-            - ✅ Multiple verification methods
-            - ✅ Comprehensive dataset analysis
-            - ✅ Machine learning pipeline
-            - ✅ System monitoring
-            - ✅ Batch processing capabilities
-            
-            ### API Endpoints Used
-            - `/health` - Connection status
-            - `/api/v1/generate` - ODE generation
-            - `/api/v1/verify` - Solution verification
-            - `/api/v1/analyze` - Dataset analysis
-            - `/api/v1/ml/*` - Machine learning operations
-            - `/api/v1/jobs` - Job management
-            - `/api/v1/stats` - System statistics
-            
-            ### Support
-            For issues or questions, check the API logs in Railway dashboard.
-            """)
-    
-    # Helper methods
-    def get_available_generators(self):
-        """Fetch available generators from API"""
-        try:
-            response = requests.get(
-                f"{st.session_state.api_url}/api/v1/generators",
-                headers=self.api_headers,
-                timeout=5
+            # Create pie chart
+            fig = px.pie(
+                values=[job_stats.get('completed', 0), job_stats.get('failed', 0), 
+                       job_stats.get('pending', 0), job_stats.get('running', 0)],
+                names=['Completed', 'Failed', 'Pending', 'Running'],
+                title='Job Status Distribution'
             )
-            if response.status_code == 200:
-                data = response.json()
-                return data.get('all', [])
-        except Exception as e:
-            logger.error(f"Failed to fetch generators: {str(e)}")
-        return []
+            st.plotly_chart(fig, use_container_width=True)
     
-    def get_available_functions(self):
-        """Fetch available functions from API"""
-        try:
-            response = requests.get(
-                f"{st.session_state.api_url}/api/v1/functions",
-                headers=self.api_headers,
-                timeout=5
-            )
-            if response.status_code == 200:
-                data = response.json()
-                return data.get('functions', [])
-        except Exception as e:
-            logger.error(f"Failed to fetch functions: {str(e)}")
-        return []
-    
-    def get_available_models(self):
-        """Fetch available ML models from API"""
-        try:
-            response = requests.get(
-                f"{st.session_state.api_url}/api/v1/models",
-                headers=self.api_headers,
-                timeout=5
-            )
-            if response.status_code == 200:
-                data = response.json()
-                return data.get('models', [])
-        except Exception as e:
-            logger.error(f"Failed to fetch models: {str(e)}")
-        return []
-    
-    def generate_single_ode(self, generator, function, params, verify):
-        """Generate a single ODE via API"""
-        with st.spinner("Generating ODE..."):
-            try:
-                response = requests.post(
-                    f"{st.session_state.api_url}/api/v1/generate",
-                    headers=self.api_headers,
-                    json={
-                        "generator": generator,
-                        "function": function,
-                        "parameters": params,
-                        "count": 1,
-                        "verify": verify
-                    },
-                    timeout=30
+    # Recent ODEs
+    if st.session_state.generated_odes:
+        st.subheader("Recently Generated ODEs")
+        
+        for i, ode in enumerate(st.session_state.generated_odes[-5:]):
+            with st.expander(f"ODE {ode.get('id', i)}", expanded=False):
+                render_ode_latex(
+                    ode.get('ode_latex', ode.get('ode', '')),
+                    ode.get('solution_latex', ode.get('solution', ''))
                 )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    job_id = result['job_id']
-                    
-                    # Poll for results
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    for i in range(60):  # 60 second timeout
-                        time.sleep(1)
-                        progress_bar.progress(min(i / 30, 0.99))
-                        
-                        status_response = requests.get(
-                            f"{st.session_state.api_url}/api/v1/jobs/{job_id}",
-                            headers=self.api_headers
-                        )
-                        
-                        if status_response.status_code == 200:
-                            job_status = status_response.json()
-                            
-                            status_text.text(f"Status: {job_status['status']}")
-                            
-                            if job_status['status'] == 'completed':
-                                progress_bar.progress(1.0)
-                                odes = job_status.get('results', [])
-                                if odes:
-                                    st.session_state.generated_odes.append(odes[0])
-                                    st.success("✅ ODE generated successfully!")
-                                    st.balloons()
-                                else:
-                                    st.error("No ODE in results")
-                                return
-                                
-                            elif job_status['status'] == 'failed':
-                                st.error(f"Generation failed: {job_status.get('error', 'Unknown error')}")
-                                return
-                    
-                    st.warning("Generation timed out")
-                else:
-                    st.error(f"API error: {response.status_code}")
-                    try:
-                        error_data = response.json()
-                        st.error(f"Details: {error_data}")
-                    except:
-                        st.error(f"Response: {response.text}")
-                        
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
-    
-    def run_batch_generation(self, generators, functions, samples, verify):
-        """Run batch ODE generation"""
-        total = len(generators) * len(functions) * samples
-        
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        results_container = st.container()
-        
-        completed = 0
-        all_results = []
-        
-        for gen in generators:
-            for func in functions:
-                status_text.text(f"Generating: {gen} + {func} ({samples} samples)...")
-                
-                try:
-                    response = requests.post(
-                        f"{st.session_state.api_url}/api/v1/generate",
-                        headers=self.api_headers,
-                        json={
-                            "generator": gen,
-                            "function": func,
-                            "count": samples,
-                            "verify": verify
-                        }
-                    )
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        job_id = result['job_id']
-                        
-                        # Poll for completion
-                        for _ in range(120):  # 2 minute timeout
-                            time.sleep(1)
-                            
-                            job_response = requests.get(
-                                f"{st.session_state.api_url}/api/v1/jobs/{job_id}",
-                                headers=self.api_headers
-                            )
-                            
-                            if job_response.status_code == 200:
-                                job_data = job_response.json()
-                                
-                                if job_data['status'] == 'completed':
-                                    results = job_data.get('results', [])
-                                    all_results.extend(results)
-                                    completed += samples
-                                    progress_bar.progress(completed / total)
-                                    
-                                    with results_container:
-                                        st.success(f"✅ {gen} + {func}: {len(results)} ODEs generated")
-                                    break
-                                    
-                                elif job_data['status'] == 'failed':
-                                    with results_container:
-                                        st.error(f"❌ {gen} + {func}: Failed")
-                                    break
-                    
-                except Exception as e:
-                    with results_container:
-                        st.error(f"❌ {gen} + {func}: Error - {str(e)}")
-        
-        status_text.text(f"Batch complete! Generated {len(all_results)} ODEs")
-        
-        if all_results:
-            # Create downloadable file
-            jsonl_content = '\n'.join(json.dumps(ode) for ode in all_results)
-            
-            st.download_button(
-                "📥 Download All ODEs (JSONL)",
-                data=jsonl_content,
-                file_name=f"batch_odes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl",
-                mime="application/x-jsonlines"
-            )
-    
-    def stream_odes(self, generator, function, count, container):
-        """Stream ODEs in real-time"""
-        try:
-            # Use SSE endpoint
-            response = requests.get(
-                f"{st.session_state.api_url}/api/v1/stream/generate",
-                headers=self.api_headers,
-                params={
-                    "generator": generator,
-                    "function": function,
-                    "count": count
-                },
-                stream=True,
-                timeout=120
-            )
-            
-            if response.status_code == 200:
-                ode_count = 0
-                
-                for line in response.iter_lines():
-                    if line:
-                        if line.startswith(b'data: '):
-                            try:
-                                data = json.loads(line[6:])
-                                ode_count += 1
-                                
-                                with container.container():
-                                    st.subheader(f"ODE {ode_count}/{count}")
-                                    
-                                    col1, col2 = st.columns([3, 1])
-                                    with col1:
-                                        if 'ode_latex' in data:
-                                            st.latex(data['ode_latex'])
-                                        else:
-                                            st.code(data.get('ode', ''))
-                                    
-                                    with col2:
-                                        if data.get('verified'):
-                                            st.success("✅ Verified")
-                                        else:
-                                            st.error("❌ Not verified")
-                                    
-                                    # Progress
-                                    progress = data.get('progress', (ode_count/count)*100)
-                                    st.progress(progress/100)
-                                    
-                            except json.JSONDecodeError:
-                                continue
-                
-                container.success(f"✅ Streamed {ode_count} ODEs successfully!")
-                
-            else:
-                container.error(f"Stream error: {response.status_code}")
-                
-        except Exception as e:
-            container.error(f"Streaming error: {str(e)}")
-    
-    def verify_ode_manual(self, ode_str, solution_str, method):
-        """Verify manually entered ODE"""
-        with st.spinner("Verifying..."):
-            try:
-                response = requests.post(
-                    f"{st.session_state.api_url}/api/v1/verify",
-                    headers=self.api_headers,
-                    json={
-                        "ode": ode_str,
-                        "solution": solution_str,
-                        "method": method
-                    },
-                    timeout=30
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    
-                    if result['verified']:
-                        st.success(f"✅ Verified! Confidence: {result['confidence']:.2%}")
-                        st.info(f"Method used: {result['method']}")
-                    else:
-                        st.error("❌ Verification failed")
-                    
-                    # Show details
-                    with st.expander("Verification Details"):
-                        st.json(result.get('details', {}))
-                        
-                else:
-                    st.error(f"API error: {response.status_code}")
-                    
-            except Exception as e:
-                st.error(f"Verification error: {str(e)}")
-    
-    def verify_batch(self, uploaded_file, method, include_failed):
-        """Verify batch of ODEs"""
-        # This would send file to API for batch verification
-        st.info("Batch verification via API - Implementation pending")
-        
-        # For now, show what would happen
-        st.code("""
-        # Would send to API:
-        POST /api/v1/verify/batch
-        {
-            "file": uploaded_file,
-            "method": method,
-            "include_failed": include_failed
-        }
-        """)
-    
-    def run_analysis(self, analysis_type, uploaded_file):
-        """Run dataset analysis"""
-        try:
-            # Prepare request
-            request_data = {
-                "analysis_type": analysis_type
-            }
-            
-            # If file uploaded, include it
-            files = {}
-            if uploaded_file:
-                files['dataset'] = uploaded_file
-            
-            response = requests.post(
-                f"{st.session_state.api_url}/api/v1/analyze",
-                headers=self.api_headers,
-                data=request_data,
-                files=files if files else None,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                job_id = result['job_id']
-                
-                st.info(f"Analysis job created: {job_id}")
-                st.info("Check job status in Recent Jobs or refresh this page")
-                
-            else:
-                st.error(f"Failed to start analysis: {response.status_code}")
-                
-        except Exception as e:
-            st.error(f"Analysis error: {str(e)}")
-    
-    def display_analysis_results(self, results):
-        """Display analysis results"""
-        if isinstance(results, dict):
-            # Summary statistics
-            if 'statistics' in results:
-                st.subheader("Statistics")
-                stats = results['statistics']
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Total ODEs", stats.get('total_odes', 0))
+                    st.metric("Generator", ode.get('generator', 'Unknown'))
                 with col2:
-                    st.metric("Verification Rate", f"{stats.get('verified_rate', 0):.1%}")
+                    st.metric("Function", ode.get('function', 'Unknown'))
                 with col3:
-                    st.metric("Avg Complexity", f"{stats.get('avg_complexity', 0):.1f}")
-            
-            # Generator distribution
-            if 'generator_distribution' in results:
-                st.subheader("Generator Distribution")
-                gen_dist = results['generator_distribution']
-                
-                fig = px.bar(
-                    x=list(gen_dist.keys()),
-                    y=list(gen_dist.values()),
-                    title="ODEs by Generator"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Other results
-            for key, value in results.items():
-                if key not in ['statistics', 'generator_distribution']:
-                    st.subheader(key.replace('_', ' ').title())
-                    if isinstance(value, dict):
-                        st.json(value)
-                    elif isinstance(value, list):
-                        st.write(value)
-                    else:
-                        st.write(value)
-        else:
-            st.json(results)
+                    verified_status = "✅ Verified" if ode.get('verified', False) else "❌ Not Verified"
+                    st.metric("Status", verified_status)
+
+def render_generation_page():
+    """Render ODE generation page"""
+    st.title("⚡ Generate ODEs")
     
-    def start_ml_training(self, model_type, epochs, batch_size, learning_rate, config, training_file):
-        """Start ML model training"""
-        with st.spinner("Starting training job..."):
-            try:
-                request_data = {
-                    "model_type": model_type,
-                    "epochs": epochs,
-                    "batch_size": batch_size,
-                    "learning_rate": learning_rate,
-                    "config": config
-                }
-                
-                if training_file:
-                    request_data["dataset"] = training_file.name
-                else:
-                    request_data["dataset"] = "server_dataset"
-                
-                response = requests.post(
-                    f"{st.session_state.api_url}/api/v1/ml/train",
-                    headers=self.api_headers,
-                    json=request_data,
-                    timeout=30
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    job_id = result['job_id']
-                    
-                    st.success(f"Training job started: {job_id}")
-                    st.info("Monitor progress in the job queue or check back later")
-                    
-                    # Store job ID for tracking
-                    st.session_state.training_job_id = job_id
-                    
-                else:
-                    st.error(f"Failed to start training: {response.status_code}")
-                    
-            except Exception as e:
-                st.error(f"Training error: {str(e)}")
+    # Get available generators and functions
+    generators_data = api_client.get_generators()
+    functions_data = api_client.get_functions()
     
-    def generate_ml_odes(self, model, n_samples, temperature, target_gen, target_func, 
-                        complexity_range, verify, unique_only):
-        """Generate ODEs using ML model"""
-        with st.spinner("Generating ODEs with ML model..."):
-            try:
-                request_data = {
-                    "model_path": model['path'],
-                    "n_samples": n_samples,
-                    "temperature": temperature,
-                    "generator": target_gen,
-                    "function": target_func,
-                    "complexity_range": list(complexity_range) if complexity_range else None
-                }
+    generators = generators_data.get('all', [])
+    functions = functions_data.get('functions', [])
+    
+    if not generators or not functions:
+        st.error("Unable to load generators or functions. Please check API connection.")
+        return
+    
+    # Generation form
+    with st.form("generation_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            selected_generator = st.selectbox(
+                "Select Generator",
+                generators,
+                help="Choose the ODE generator type"
+            )
+            
+            selected_function = st.selectbox(
+                "Select Function",
+                functions,
+                help="Choose the mathematical function"
+            )
+            
+            count = st.number_input(
+                "Number of ODEs",
+                min_value=1,
+                max_value=100,
+                value=1,
+                help="How many ODEs to generate"
+            )
+        
+        with col2:
+            st.markdown("### Parameters")
+            
+            # Parameter inputs
+            params = {}
+            params['alpha'] = st.slider("α (alpha)", -2.0, 2.0, 1.0, 0.1)
+            params['beta'] = st.slider("β (beta)", 0.1, 2.0, 1.0, 0.1)
+            params['M'] = st.slider("M", -1.0, 1.0, 0.0, 0.1)
+            
+            # Nonlinear parameters
+            if 'N' in selected_generator:
+                params['q'] = st.slider("q (power)", 2, 5, 2)
+                params['v'] = st.slider("v (power)", 2, 5, 3)
+            
+            # Pantograph parameter
+            if 'L4' in selected_generator or 'N6' in selected_generator:
+                params['a'] = st.slider("a (pantograph)", 2, 5, 2)
+            
+            verify = st.checkbox("Verify solutions", value=True)
+        
+        submit = st.form_submit_button("Generate ODEs", type="primary")
+    
+    if submit:
+        with st.spinner("Generating ODEs..."):
+            # Call API
+            result = api_client.generate_odes(
+                selected_generator,
+                selected_function,
+                params,
+                count,
+                verify
+            )
+            
+            if result and 'job_id' in result:
+                st.session_state.current_job_id = result['job_id']
+                st.info(f"Job created: {result['job_id']}")
                 
-                response = requests.post(
-                    f"{st.session_state.api_url}/api/v1/ml/generate",
-                    headers=self.api_headers,
-                    json=request_data,
-                    timeout=60
-                )
+                # Poll for results
+                progress_bar = st.progress(0)
+                status_text = st.empty()
                 
-                if response.status_code == 200:
-                    result = response.json()
-                    job_id = result['job_id']
+                while True:
+                    job_status = api_client.get_job_status(result['job_id'])
                     
-                    # Poll for results
-                    progress_bar = st.progress(0)
-                    
-                    for i in range(120):  # 2 minute timeout
-                        time.sleep(1)
-                        progress_bar.progress(min(i / 60, 0.99))
+                    if job_status:
+                        progress = job_status.get('progress', 0)
+                        progress_bar.progress(int(progress))
+                        status_text.text(f"Status: {job_status.get('status', 'Unknown')}")
                         
-                        job_response = requests.get(
-                            f"{st.session_state.api_url}/api/v1/jobs/{job_id}",
-                            headers=self.api_headers
+                        if job_status.get('status') == 'completed':
+                            # Display results
+                            results = job_status.get('results', [])
+                            st.success(f"Generated {len(results)} ODEs successfully!")
+                            
+                            # Store in session state
+                            st.session_state.generated_odes.extend(results)
+                            
+                            # Display ODEs
+                            for ode in results:
+                                with st.expander(f"ODE {ode.get('id', '')}", expanded=True):
+                                    # Display equation and solution
+                                    render_ode_latex(
+                                        ode.get('ode_latex', ode.get('ode', '')),
+                                        ode.get('solution_latex', ode.get('solution', ''))
+                                    )
+                                    
+                                    # Display properties
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        st.metric("Complexity", ode.get('complexity', 'N/A'))
+                                    with col2:
+                                        verified = "✅" if ode.get('verified', False) else "❌"
+                                        st.metric("Verified", verified)
+                                    with col3:
+                                        st.metric("Generation Time", f"{ode.get('generation_time', 0):.3f}s")
+                                    
+                                    # Plot solution
+                                    if ode.get('solution'):
+                                        fig = plot_solution(
+                                            ode['solution'],
+                                            params=ode.get('parameters', {})
+                                        )
+                                        if fig:
+                                            st.plotly_chart(fig, use_container_width=True)
+                                    
+                                    # Initial conditions
+                                    if 'initial_conditions' in ode:
+                                        st.markdown("**Initial Conditions:**")
+                                        for ic_key, ic_value in ode['initial_conditions'].items():
+                                            st.code(f"{ic_key} = {ic_value}")
+                            
+                            break
+                        
+                        elif job_status.get('status') == 'failed':
+                            st.error(f"Job failed: {job_status.get('error', 'Unknown error')}")
+                            break
+                    
+                    time.sleep(1)
+
+def render_verification_page():
+    """Render ODE verification page"""
+    st.title("✅ Verify ODE Solutions")
+    
+    tab1, tab2 = st.tabs(["Manual Verification", "Batch Verification"])
+    
+    with tab1:
+        st.markdown("### Enter ODE and Solution")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            ode_input = st.text_area(
+                "ODE Equation",
+                placeholder="e.g., y''(x) + y(x) = sin(x)",
+                height=100
+            )
+        
+        with col2:
+            solution_input = st.text_area(
+                "Proposed Solution",
+                placeholder="e.g., C1*cos(x) + C2*sin(x) + sin(x)/2",
+                height=100
+            )
+        
+        if st.button("Verify Solution", type="primary"):
+            if ode_input and solution_input:
+                with st.spinner("Verifying..."):
+                    result = api_client.verify_ode(ode_input, solution_input)
+                    
+                    if result:
+                        if result.get('verified'):
+                            st.markdown("""
+                            <div class="success-box">
+                                <h3>✅ Solution Verified!</h3>
+                                <p>Confidence: {:.2%}</p>
+                                <p>Method: {}</p>
+                            </div>
+                            """.format(
+                                result.get('confidence', 0),
+                                result.get('method', 'Unknown')
+                            ), unsafe_allow_html=True)
+                        else:
+                            st.markdown("""
+                            <div class="error-box">
+                                <h3>❌ Solution Not Verified</h3>
+                                <p>The provided solution does not satisfy the ODE.</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        # Show details
+                        with st.expander("Verification Details"):
+                            st.json(result.get('details', {}))
+    
+    with tab2:
+        st.markdown("### Verify Generated ODEs")
+        
+        if st.session_state.generated_odes:
+            # Create dataframe
+            df_data = []
+            for ode in st.session_state.generated_odes:
+                df_data.append({
+                    'ID': ode.get('id', ''),
+                    'Generator': ode.get('generator', ''),
+                    'Function': ode.get('function', ''),
+                    'Verified': '✅' if ode.get('verified', False) else '❌',
+                    'Complexity': ode.get('complexity', 0)
+                })
+            
+            df = pd.DataFrame(df_data)
+            st.dataframe(df, use_container_width=True)
+            
+            # Re-verify button
+            if st.button("Re-verify All"):
+                progress_bar = st.progress(0)
+                
+                for i, ode in enumerate(st.session_state.generated_odes):
+                    if ode.get('ode') and ode.get('solution'):
+                        result = api_client.verify_ode(
+                            ode['ode'],
+                            ode['solution']
                         )
                         
-                        if job_response.status_code == 200:
-                            job_data = job_response.json()
-                            
-                            if job_data['status'] == 'completed':
-                                progress_bar.progress(1.0)
-                                
-                                results = job_data.get('results', {})
-                                generated_odes = results.get('odes', [])
-                                
-                                st.success(f"Generated {len(generated_odes)} ODEs!")
-                                
-                                # Display results
-                                col1, col2, col3 = st.columns(3)
-                                with col1:
-                                    st.metric("Generated", len(generated_odes))
-                                with col2:
-                                    st.metric("Valid", results.get('valid_count', 0))
-                                with col3:
-                                    st.metric("Avg Novelty", f"{results.get('avg_novelty_score', 0):.2f}")
-                                
-                                # Show generated ODEs
-                                if generated_odes:
-                                    st.subheader("Generated ODEs")
-                                    for i, ode in enumerate(generated_odes[:5]):  # Show first 5
-                                        with st.expander(f"ODE {i+1}"):
-                                            st.code(ode.get('ode', ''))
-                                            if ode.get('valid'):
-                                                st.success("✅ Valid")
-                                            else:
-                                                st.error("❌ Invalid")
-                                
-                                # Download all
-                                if generated_odes:
-                                    jsonl_content = '\n'.join(json.dumps(ode) for ode in generated_odes)
-                                    st.download_button(
-                                        "📥 Download Generated ODEs",
-                                        data=jsonl_content,
-                                        file_name=f"ml_generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl",
-                                        mime="application/x-jsonlines"
-                                    )
-                                
-                                return
-                                
-                            elif job_data['status'] == 'failed':
-                                st.error(f"Generation failed: {job_data.get('error', 'Unknown error')}")
-                                return
+                        if result:
+                            ode['verified'] = result.get('verified', False)
+                            ode['verification_confidence'] = result.get('confidence', 0)
                     
-                    st.warning("ML generation timed out")
-                    
-                else:
-                    st.error(f"Failed to start ML generation: {response.status_code}")
-                    
-            except Exception as e:
-                st.error(f"ML generation error: {str(e)}")
+                    progress_bar.progress((i + 1) / len(st.session_state.generated_odes))
+                
+                st.success("Re-verification complete!")
+                st.rerun()
+        else:
+            st.info("No ODEs generated yet. Go to the Generation page to create some ODEs.")
 
-# Main execution
+def render_analysis_page():
+    """Render analysis page"""
+    st.title("📊 ODE Analysis Suite")
+    
+    if not st.session_state.generated_odes:
+        st.warning("No ODEs available for analysis. Please generate some ODEs first.")
+        return
+    
+    # Prepare data for analysis
+    ode_list = [ode.get('ode', '') for ode in st.session_state.generated_odes if ode.get('ode')]
+    
+    if st.button("Run Comprehensive Analysis", type="primary"):
+        with st.spinner("Analyzing ODEs..."):
+            result = api_client.analyze_dataset(ode_list)
+            
+            if result and 'job_id' in result:
+                # Poll for results
+                while True:
+                    job_status = api_client.get_job_status(result['job_id'])
+                    
+                    if job_status and job_status.get('status') == 'completed':
+                        analysis_results = job_status.get('results', {})
+                        st.session_state.analysis_results = analysis_results
+                        break
+                    
+                    time.sleep(1)
+    
+    # Display analysis results
+    if st.session_state.analysis_results:
+        results = st.session_state.analysis_results
+        
+        # Overview metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total ODEs", results.get('total_odes', 0))
+        
+        with col2:
+            stats = results.get('statistics', {})
+            st.metric("Verification Rate", f"{stats.get('verified_rate', 0):.1%}")
+        
+        with col3:
+            st.metric("Avg Complexity", f"{stats.get('avg_complexity', 0):.1f}")
+        
+        with col4:
+            st.metric("Complexity Std", f"{stats.get('complexity_std', 0):.1f}")
+        
+        # Generator distribution
+        if 'generator_distribution' in results:
+            st.subheader("Generator Distribution")
+            
+            gen_dist = results['generator_distribution']
+            fig = px.bar(
+                x=list(gen_dist.keys()),
+                y=list(gen_dist.values()),
+                title="ODEs by Generator",
+                labels={'x': 'Generator', 'y': 'Count'}
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Complexity distribution
+        st.subheader("Complexity Analysis")
+        
+        complexities = [ode.get('complexity', 0) for ode in st.session_state.generated_odes]
+        
+        fig = go.Figure()
+        fig.add_trace(go.Histogram(
+            x=complexities,
+            nbinsx=30,
+            name='Complexity Distribution'
+        ))
+        fig.update_layout(
+            title='ODE Complexity Distribution',
+            xaxis_title='Complexity Score',
+            yaxis_title='Count'
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Verification analysis
+        st.subheader("Verification Analysis")
+        
+        verified_count = sum(1 for ode in st.session_state.generated_odes if ode.get('verified', False))
+        unverified_count = len(st.session_state.generated_odes) - verified_count
+        
+        fig = px.pie(
+            values=[verified_count, unverified_count],
+            names=['Verified', 'Not Verified'],
+            title='Verification Status',
+            color_discrete_map={'Verified': '#28a745', 'Not Verified': '#dc3545'}
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+def render_ml_training_page():
+    """Render ML training page"""
+    st.title("🤖 Machine Learning Training")
+    
+    st.markdown("""
+    Train machine learning models on your ODE dataset to learn patterns and generate novel equations.
+    """)
+    
+    # Model configuration
+    with st.form("ml_training_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            model_type = st.selectbox(
+                "Model Type",
+                ["pattern_net", "transformer", "vae"],
+                help="Select the ML architecture"
+            )
+            
+            epochs = st.number_input(
+                "Training Epochs",
+                min_value=1,
+                max_value=1000,
+                value=50
+            )
+            
+            batch_size = st.selectbox(
+                "Batch Size",
+                [16, 32, 64, 128],
+                index=1
+            )
+        
+        with col2:
+            learning_rate = st.select_slider(
+                "Learning Rate",
+                options=[0.00001, 0.0001, 0.001, 0.01, 0.1],
+                value=0.001,
+                format_func=lambda x: f"{x:.5f}"
+            )
+            
+            early_stopping = st.checkbox("Early Stopping", value=True)
+            
+            # Advanced options
+            with st.expander("Advanced Configuration"):
+                dropout_rate = st.slider("Dropout Rate", 0.0, 0.5, 0.2, 0.05)
+                hidden_dims = st.text_input("Hidden Dimensions", "256,128,64")
+        
+        # Dataset selection
+        st.markdown("### Training Dataset")
+        
+        dataset_option = st.radio(
+            "Dataset Source",
+            ["Use Generated ODEs", "Upload Dataset"]
+        )
+        
+        if dataset_option == "Use Generated ODEs":
+            if st.session_state.generated_odes:
+                st.info(f"Using {len(st.session_state.generated_odes)} generated ODEs")
+                dataset_id = "session_odes"
+            else:
+                st.warning("No ODEs generated. Please generate ODEs first.")
+                dataset_id = None
+        else:
+            uploaded_file = st.file_uploader("Upload JSONL dataset", type=['jsonl'])
+            dataset_id = "uploaded_dataset" if uploaded_file else None
+        
+        submit = st.form_submit_button("Start Training", type="primary")
+    
+    if submit and dataset_id:
+        # Prepare configuration
+        config = {
+            'dropout_rate': dropout_rate,
+            'hidden_dims': [int(x.strip()) for x in hidden_dims.split(',')],
+            'early_stopping': early_stopping
+        }
+        
+        with st.spinner("Initializing training..."):
+            result = api_client.train_model(
+                dataset_id,
+                model_type,
+                epochs,
+                config
+            )
+            
+            if result and 'job_id' in result:
+                st.info(f"Training job started: {result['job_id']}")
+                
+                # Training progress
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                metrics_placeholder = st.empty()
+                
+                while True:
+                    job_status = api_client.get_job_status(result['job_id'])
+                    
+                    if job_status:
+                        progress = job_status.get('progress', 0)
+                        progress_bar.progress(int(progress))
+                        
+                        # Update status
+                        metadata = job_status.get('metadata', {})
+                        status_text.text(
+                            f"Epoch {metadata.get('current_epoch', 0)}/{metadata.get('total_epochs', epochs)}"
+                        )
+                        
+                        if job_status.get('status') == 'completed':
+                            results = job_status.get('results', {})
+                            
+                            st.success("Training completed successfully!")
+                            
+                            # Save model info
+                            st.session_state.trained_models.append({
+                                'model_id': results.get('model_id'),
+                                'model_path': results.get('model_path'),
+                                'model_type': model_type,
+                                'metrics': results.get('final_metrics', {}),
+                                'timestamp': datetime.now()
+                            })
+                            
+                            # Display final metrics
+                            st.subheader("Training Results")
+                            
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("Final Loss", f"{results.get('final_metrics', {}).get('loss', 0):.4f}")
+                            with col2:
+                                st.metric("Accuracy", f"{results.get('final_metrics', {}).get('accuracy', 0):.2%}")
+                            with col3:
+                                st.metric("Val Loss", f"{results.get('final_metrics', {}).get('validation_loss', 0):.4f}")
+                            with col4:
+                                st.metric("Val Accuracy", f"{results.get('final_metrics', {}).get('validation_accuracy', 0):.2%}")
+                            
+                            break
+                        
+                        elif job_status.get('status') == 'failed':
+                            st.error(f"Training failed: {job_status.get('error', 'Unknown error')}")
+                            break
+                    
+                    time.sleep(2)
+
+def render_ml_generation_page():
+    """Render ML generation page"""
+    st.title("🧪 ML-Based ODE Generation")
+    
+    if not st.session_state.trained_models:
+        st.warning("No trained models available. Please train a model first.")
+        return
+    
+    st.markdown("Generate novel ODEs using trained machine learning models.")
+    
+    # Model selection
+    model_options = [
+        f"{m['model_type']} - {m['model_id']}" 
+        for m in st.session_state.trained_models
+    ]
+    
+    selected_model_idx = st.selectbox(
+        "Select Trained Model",
+        range(len(model_options)),
+        format_func=lambda x: model_options[x]
+    )
+    
+    selected_model = st.session_state.trained_models[selected_model_idx]
+    
+    # Display model info
+    with st.expander("Model Information"):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Model Type", selected_model['model_type'])
+            st.metric("Training Accuracy", f"{selected_model['metrics'].get('accuracy', 0):.2%}")
+        with col2:
+            st.metric("Validation Accuracy", f"{selected_model['metrics'].get('validation_accuracy', 0):.2%}")
+            st.metric("Training Date", selected_model['timestamp'].strftime("%Y-%m-%d %H:%M"))
+    
+    # Generation parameters
+    with st.form("ml_generation_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            n_samples = st.number_input(
+                "Number of ODEs to Generate",
+                min_value=1,
+                max_value=100,
+                value=10
+            )
+            
+            temperature = st.slider(
+                "Temperature (Creativity)",
+                min_value=0.1,
+                max_value=2.0,
+                value=0.8,
+                step=0.1,
+                help="Higher values = more creative/diverse outputs"
+            )
+        
+        with col2:
+            target_generator = st.selectbox(
+                "Target Generator Style (Optional)",
+                ["None"] + api_client.get_generators().get('all', [])
+            )
+            
+            target_function = st.selectbox(
+                "Target Function Type (Optional)",
+                ["None"] + api_client.get_functions().get('functions', [])
+            )
+            
+            complexity_min = st.number_input("Min Complexity", value=50)
+            complexity_max = st.number_input("Max Complexity", value=200)
+        
+        submit = st.form_submit_button("Generate ODEs", type="primary")
+    
+    if submit:
+        with st.spinner("Generating novel ODEs..."):
+            # Prepare request
+            generation_params = {
+                'model_path': selected_model['model_path'],
+                'n_samples': n_samples,
+                'temperature': temperature
+            }
+            
+            if target_generator != "None":
+                generation_params['generator'] = target_generator
+            if target_function != "None":
+                generation_params['function'] = target_function
+            
+            generation_params['complexity_range'] = [complexity_min, complexity_max]
+            
+            # Call API
+            result = api_client.generate_with_ml(
+                selected_model['model_path'],
+                n_samples,
+                temperature
+            )
+            
+            if result and 'job_id' in result:
+                # Poll for results
+                progress_bar = st.progress(0)
+                
+                while True:
+                    job_status = api_client.get_job_status(result['job_id'])
+                    
+                    if job_status:
+                        progress = job_status.get('progress', 0)
+                        progress_bar.progress(int(progress))
+                        
+                        if job_status.get('status') == 'completed':
+                            ml_results = job_status.get('results', {})
+                            
+                            st.success(f"Generated {len(ml_results.get('odes', []))} novel ODEs!")
+                            
+                            # Display metrics
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Avg Novelty Score", f"{ml_results.get('avg_novelty_score', 0):.2f}")
+                            with col2:
+                                st.metric("Diversity Score", f"{ml_results.get('diversity_score', 0):.2f}")
+                            with col3:
+                                st.metric("Valid Rate", f"{ml_results.get('valid_rate', 0):.1%}")
+                            
+                            # Display generated ODEs
+                            st.subheader("Generated ODEs")
+                            
+                            for i, ode in enumerate(ml_results.get('odes', [])):
+                                with st.expander(f"ML-Generated ODE {i+1}", expanded=i==0):
+                                    if 'ode_latex' in ode:
+                                        st.latex(ode['ode_latex'])
+                                    else:
+                                        st.code(ode.get('ode', ''))
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        st.metric("Novelty Score", f"{ode.get('novelty_score', 0):.2f}")
+                                    with col2:
+                                        valid = "✅" if ode.get('valid', False) else "❌"
+                                        st.metric("Valid", valid)
+                                    with col3:
+                                        st.metric("Temperature", f"{ode.get('temperature', temperature):.1f}")
+                            
+                            break
+                        
+                        elif job_status.get('status') == 'failed':
+                            st.error(f"Generation failed: {job_status.get('error', 'Unknown error')}")
+                            break
+                    
+                    time.sleep(1)
+
+def render_statistics_page():
+    """Render statistics page"""
+    st.title("📈 System Statistics")
+    
+    # Get statistics
+    stats = api_client.get_statistics()
+    
+    if not stats:
+        st.error("Unable to load statistics")
+        return
+    
+    # System overview
+    st.subheader("System Overview")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        uptime_hours = stats.get('uptime', 0) / 3600
+        st.metric("Uptime", f"{uptime_hours:.1f} hours")
+    
+    with col2:
+        st.metric("Redis Status", "🟢 Connected" if stats.get('redis_available') else "🔴 Disconnected")
+    
+    with col3:
+        st.metric("Generators", "🟢 Loaded" if stats.get('generators_available') else "🔴 Not Available")
+    
+    with col4:
+        st.metric("Cache Size", stats.get('cache_size', 0))
+    
+    # Job statistics
+    if 'job_statistics' in stats:
+        st.subheader("Job Statistics")
+        
+        job_stats = stats['job_statistics']
+        
+        # Create metrics
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            st.metric("Total Jobs", job_stats.get('total', 0))
+        with col2:
+            st.metric("Completed", job_stats.get('completed', 0))
+        with col3:
+            st.metric("Failed", job_stats.get('failed', 0))
+        with col4:
+            st.metric("Pending", job_stats.get('pending', 0))
+        with col5:
+            st.metric("Running", job_stats.get('running', 0))
+        
+        # Success rate
+        if job_stats.get('total', 0) > 0:
+            success_rate = job_stats.get('completed', 0) / job_stats.get('total', 0)
+            
+            fig = go.Figure(go.Indicator(
+                mode = "gauge+number+delta",
+                value = success_rate * 100,
+                domain = {'x': [0, 1], 'y': [0, 1]},
+                title = {'text': "Job Success Rate (%)"},
+                gauge = {
+                    'axis': {'range': [None, 100]},
+                    'bar': {'color': "darkgreen"},
+                    'steps': [
+                        {'range': [0, 50], 'color': "lightgray"},
+                        {'range': [50, 80], 'color': "gray"}
+                    ],
+                    'threshold': {
+                        'line': {'color': "red", 'width': 4},
+                        'thickness': 0.75,
+                        'value': 90
+                    }
+                }
+            ))
+            
+            st.plotly_chart(fig, use_container_width=True)
+    
+    # Generator performance
+    st.subheader("Generator Performance")
+    
+    if st.session_state.generated_odes:
+        # Aggregate by generator
+        gen_performance = {}
+        
+        for ode in st.session_state.generated_odes:
+            gen = ode.get('generator', 'Unknown')
+            if gen not in gen_performance:
+                gen_performance[gen] = {
+                    'count': 0,
+                    'verified': 0,
+                    'total_time': 0,
+                    'complexities': []
+                }
+            
+            gen_performance[gen]['count'] += 1
+            if ode.get('verified', False):
+                gen_performance[gen]['verified'] += 1
+            gen_performance[gen]['total_time'] += ode.get('generation_time', 0)
+            gen_performance[gen]['complexities'].append(ode.get('complexity', 0))
+        
+        # Create performance table
+        perf_data = []
+        for gen, data in gen_performance.items():
+            perf_data.append({
+                'Generator': gen,
+                'Count': data['count'],
+                'Verified': data['verified'],
+                'Success Rate': f"{100 * data['verified'] / data['count']:.1f}%",
+                'Avg Time': f"{data['total_time'] / data['count']:.3f}s",
+                'Avg Complexity': f"{np.mean(data['complexities']):.1f}"
+            })
+        
+        df = pd.DataFrame(perf_data)
+        st.dataframe(df, use_container_width=True)
+
+def render_settings_page():
+    """Render settings page"""
+    st.title("⚙️ Settings")
+    
+    st.markdown("### API Configuration")
+    
+    with st.form("api_settings"):
+        api_url = st.text_input(
+            "API Base URL",
+            value=API_BASE_URL,
+            help="The base URL of your deployed API"
+        )
+        
+        api_key = st.text_input(
+            "API Key",
+            value=API_KEY,
+            type="password",
+            help="Your API authentication key"
+        )
+        
+        if st.form_submit_button("Update API Settings"):
+            # In a real app, you'd save these securely
+            st.success("API settings updated!")
+    
+    st.markdown("### Export Options")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("Export Generated ODEs"):
+            if st.session_state.generated_odes:
+                # Create JSON export
+                export_data = {
+                    'export_date': datetime.now().isoformat(),
+                    'total_odes': len(st.session_state.generated_odes),
+                    'odes': st.session_state.generated_odes
+                }
+                
+                json_str = json.dumps(export_data, indent=2)
+                b64 = base64.b64encode(json_str.encode()).decode()
+                href = f'<a href="data:file/json;base64,{b64}" download="ode_export.json">Download JSON</a>'
+                st.markdown(href, unsafe_allow_html=True)
+            else:
+                st.warning("No ODEs to export")
+    
+    with col2:
+        if st.button("Export Analysis Report"):
+            if st.session_state.analysis_results:
+                # Create report
+                report = {
+                    'report_date': datetime.now().isoformat(),
+                    'analysis': st.session_state.analysis_results
+                }
+                
+                json_str = json.dumps(report, indent=2)
+                b64 = base64.b64encode(json_str.encode()).decode()
+                href = f'<a href="data:file/json;base64,{b64}" download="analysis_report.json">Download Report</a>'
+                st.markdown(href, unsafe_allow_html=True)
+            else:
+                st.warning("No analysis results to export")
+    
+    st.markdown("### Clear Data")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("Clear Generated ODEs", type="secondary"):
+            st.session_state.generated_odes = []
+            st.success("Generated ODEs cleared")
+    
+    with col2:
+        if st.button("Clear Trained Models", type="secondary"):
+            st.session_state.trained_models = []
+            st.success("Trained models cleared")
+    
+    with col3:
+        if st.button("Clear All Data", type="secondary"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.success("All data cleared")
+            st.rerun()
+
 if __name__ == "__main__":
-    app = ODEProductionGUI()
-    app.main()
+    main()
