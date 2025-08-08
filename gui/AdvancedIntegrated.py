@@ -1,17 +1,16 @@
 """
-Streamlit GUI for ODE Master Generator — Railway-ready
-------------------------------------------------------
+Streamlit GUI for ODE Master Generator — Railway-ready (prefix-agnostic)
+-------------------------------------------------------------------------
 
 • Single-file Streamlit app designed for Railway deployment
-• Robust API client with response-shape normalization and clear errors
-• Polished UI + sections: Dashboard, Quick Generate, Batch, Verify, Datasets,
-  ML Train, ML Generate, Analysis, Tools, Docs
-• Demo fallback so the UI still works when API is unreachable (set USE_DEMO=1)
+• Robust API client with **auto-detected** API prefix (works with or without /api/v1)
+• Clear errors, demo fallback, and polished UI sections
 
 Env vars expected (Railway → Variables):
   API_BASE_URL=https://your-api.yourdomain.tld
   API_KEY=xxxxxxxxxxxxxxxx
-  USE_DEMO=0|1 (optional)
+  API_PREFIX=auto|/api/v1|""      # default: auto
+  USE_DEMO=0|1                    # optional (default 0)
 
 Start command for Railway (example):
   streamlit run streamlit_app.py --server.port $PORT --server.address 0.0.0.0
@@ -19,29 +18,27 @@ Start command for Railway (example):
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import time
-import json
-import base64
-import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-import requests
-import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
+import requests
+import streamlit as st
 
-# Optional but nice to have for latex & parsing of expressions
+# Optional (used for plotting solutions)
 try:
     import sympy as sp
-    from sympy.parsing.sympy_parser import parse_expr
 except Exception:  # pragma: no cover
     sp = None
 
-# ---------- Config ----------
+# ---------- Page / Theme ----------
 
 st.set_page_config(
     page_title="ODE Master Generator",
@@ -50,8 +47,11 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ---------- Config ----------
+
 API_BASE_URL = (os.getenv("API_BASE_URL") or "https://ode-api-production.up.railway.app").rstrip("/")
 API_KEY = os.getenv("API_KEY", "test-key")
+API_PREFIX = os.getenv("API_PREFIX", "auto").strip()  # "", "/api/v1", or "auto"
 USE_DEMO = str(os.getenv("USE_DEMO", "0")).lower() in {"1", "true", "yes"}
 REQUEST_TIMEOUT = 30
 
@@ -77,6 +77,7 @@ st.markdown(
 def _init_state():
     ss = st.session_state
     ss.setdefault("api_status", None)
+    ss.setdefault("api_prefix", None)
     ss.setdefault("available_generators", [])
     ss.setdefault("available_functions", [])
     ss.setdefault("generated_odes", [])
@@ -92,12 +93,46 @@ _init_state()
 # ---------- API Client ----------
 
 class API:
-    def __init__(self, base: str, key: str):
+    """
+    Prefix-agnostic client.
+
+    - /health and /metrics are always requested **without** a prefix.
+    - All feature endpoints go through `_request_v` which adds the detected prefix.
+    - Prefix detection tries (in order): explicit API_PREFIX, /api/v1, "" (no prefix).
+    """
+
+    def __init__(self, base: str, key: str, explicit_prefix: str = API_PREFIX):
         self.base = base.rstrip("/")
         self.headers = {"X-API-Key": key, "Content-Type": "application/json"}
+        self.prefix = self._detect_prefix(explicit_prefix)
 
-    # ---- Low-level
-    def _request(self, method: str, path: str, *, json_body: Any | None = None, timeout: int = REQUEST_TIMEOUT) -> Tuple[Optional[Any], Optional[str]]:
+    # ---- Prefix detection
+    def _detect_prefix(self, explicit_prefix: str) -> str:
+        # If explicitly forced (including empty string), honor it.
+        if explicit_prefix and explicit_prefix.lower() != "auto":
+            p = explicit_prefix
+            if p and not p.startswith("/"):
+                p = "/" + p
+            st.sidebar.caption(f"API prefix (forced): {p}")
+            return p
+
+        # Auto: probe common prefixes
+        candidates = ["/api/v1", ""]  # try versioned first, then none
+        for p in candidates:
+            try:
+                url = f"{self.base}{p}/generators"
+                r = requests.get(url, headers=self.headers, timeout=6)
+                # Treat 200 and 401/403 (auth in front of a valid path) as "exists"
+                if r.status_code in (200, 401, 403):
+                    st.sidebar.caption(f"API prefix (auto): {p or '(none)'}")
+                    return p
+            except Exception:
+                pass
+        st.sidebar.caption("API prefix (auto): (none, fallback)")
+        return ""
+
+    # ---- Low-level request
+    def _request(self, method: str, path: str, *, json_body: Any | None = None, timeout: int = REQUEST_TIMEOUT):
         url = f"{self.base}{path}"
         try:
             r = requests.request(method, url, headers=self.headers, json=json_body, timeout=timeout)
@@ -106,23 +141,29 @@ class API:
             if path.endswith("/metrics"):
                 return r.text, None
             if r.text.strip():
-                return r.json(), None
+                try:
+                    return r.json(), None
+                except Exception:
+                    return r.text, None
             return None, None
-        except Exception as e:  # pragma: no cover
+        except Exception as e:
             return None, f"{method} {path} → {e}"
+
+    # ---- Versioned helper (adds the detected prefix)
+    def _request_v(self, method: str, path: str, *, json_body: Any | None = None, timeout: int = REQUEST_TIMEOUT):
+        return self._request(method, f"{self.prefix}{path}", json_body=json_body, timeout=timeout)
 
     # ---- Normalized helpers
     def health(self) -> Dict[str, Any]:
         data, err = self._request("GET", "/health", timeout=8)
         if err:
             return {"status": "error", "error": err}
-        return data or {"status": "unknown"}
+        return data if isinstance(data, dict) else {"status": "unknown"}
 
     def generators(self) -> List[str]:
-        data, err = self._request("GET", "/api/v1/generators")
+        data, err = self._request_v("GET", "/generators")
         if err or data is None:
             return []
-        # normalize various shapes -> list[str]
         try:
             if isinstance(data, list):
                 return [str(x) for x in data]
@@ -130,16 +171,17 @@ class API:
                 return [str(x) for x in data["all"]]
             if "generators" in data and isinstance(data["generators"], list):
                 return [str(x) for x in data["generators"]]
-            linear = data.get("linear", []) if isinstance(data, dict) else []
-            nonlinear = data.get("nonlinear", []) if isinstance(data, dict) else []
-            if linear or nonlinear:
-                return [*map(str, linear), *map(str, nonlinear)]
+            if isinstance(data, dict):
+                linear = data.get("linear", [])
+                nonlinear = data.get("nonlinear", [])
+                if linear or nonlinear:
+                    return [*map(str, linear), *map(str, nonlinear)]
         except Exception:
             pass
         return []
 
     def functions(self) -> List[str]:
-        data, err = self._request("GET", "/api/v1/functions")
+        data, err = self._request_v("GET", "/functions")
         if err or data is None:
             return []
         try:
@@ -157,11 +199,11 @@ class API:
 
     def generate(self, *, generator: str, function: str, parameters: Dict[str, Any], count: int = 1, verify: bool = True) -> Dict[str, Any] | None:
         body = {"generator": generator, "function": function, "parameters": parameters, "count": count, "verify": verify}
-        data, err = self._request("POST", "/api/v1/generate", json_body=body)
+        data, err = self._request_v("POST", "/generate", json_body=body)
         if err:
             st.error(f"Generate failed: {err}")
             return None
-        return data
+        return data if isinstance(data, dict) else None
 
     def batch_generate(self, *, generators: List[str], functions: List[str], samples_per_combination: int, parameters: Optional[Dict[str, Any]] = None, verify: bool = True, dataset_name: Optional[str] = None) -> Dict[str, Any] | None:
         body: Dict[str, Any] = {
@@ -174,50 +216,50 @@ class API:
             body["parameters"] = parameters
         if dataset_name:
             body["dataset_name"] = dataset_name
-        data, err = self._request("POST", "/api/v1/batch_generate", json_body=body)
+        data, err = self._request_v("POST", "/batch_generate", json_body=body)
         if err:
             st.error(f"Batch generate failed: {err}")
             return None
-        return data
+        return data if isinstance(data, dict) else None
 
     def verify(self, *, ode: str, solution: str, method: str = "substitution") -> Dict[str, Any] | None:
         body = {"ode": ode, "solution": solution, "method": method}
-        data, err = self._request("POST", "/api/v1/verify", json_body=body)
+        data, err = self._request_v("POST", "/verify", json_body=body)
         if err:
             st.error(f"Verify failed: {err}")
             return None
-        return data
+        return data if isinstance(data, dict) else None
 
     def datasets(self) -> Dict[str, Any]:
-        data, err = self._request("GET", "/api/v1/datasets")
-        return data or {"datasets": [], "count": 0}
+        data, _ = self._request_v("GET", "/datasets")
+        return data if isinstance(data, dict) else {"datasets": [], "count": 0}
 
     def create_dataset(self, *, odes: List[Dict[str, Any]], dataset_name: Optional[str] = None) -> Dict[str, Any] | None:
         body = {"odes": odes, "dataset_name": dataset_name}
-        data, err = self._request("POST", "/api/v1/datasets/create", json_body=body)
+        data, err = self._request_v("POST", "/datasets/create", json_body=body)
         if err:
             st.error(f"Create dataset failed: {err}")
             return None
-        return data
+        return data if isinstance(data, dict) else None
 
     def models(self) -> Dict[str, Any]:
-        data, _ = self._request("GET", "/api/v1/models")
-        return data or {"models": [], "count": 0}
+        data, _ = self._request_v("GET", "/models")
+        return data if isinstance(data, dict) else {"models": [], "count": 0}
 
     def stats(self) -> Dict[str, Any]:
-        data, _ = self._request("GET", "/api/v1/stats")
-        return data or {}
+        data, _ = self._request_v("GET", "/stats")
+        return data if isinstance(data, dict) else {}
 
     def metrics(self) -> str:
         data, _ = self._request("GET", "/metrics")
         return data or ""
 
     def job_status(self, job_id: str) -> Dict[str, Any] | None:
-        data, err = self._request("GET", f"/api/v1/jobs/{job_id}")
+        data, err = self._request_v("GET", f"/jobs/{job_id}")
         if err:
             st.error(f"Job status failed: {err}")
             return None
-        return data
+        return data if isinstance(data, dict) else None
 
 
 api = API(API_BASE_URL, API_KEY)
@@ -231,13 +273,11 @@ DEMO_FUNCTIONS = ["sine", "cosine", "tangent_safe", "exponential", "exp_scaled",
 
 @st.cache_data(ttl=60)
 def cached_generators() -> List[str]:
-    gens = api.generators()
-    return gens
+    return api.generators()
 
 @st.cache_data(ttl=60)
 def cached_functions() -> List[str]:
-    funcs = api.functions()
-    return funcs
+    return api.functions()
 
 @st.cache_data(ttl=30)
 def cached_stats() -> Dict[str, Any]:
@@ -258,7 +298,6 @@ def header():
 
 def status_chip(ok: bool) -> str:
     return f"<span class='{ 'ok-dot' if ok else 'bad-dot' }'></span>{'API Online' if ok else 'API Offline'}"
-
 
 def probe_and_load_resources():
     """Hit /health, load generators & functions (with demo fallback)."""
@@ -281,11 +320,9 @@ def probe_and_load_resources():
     st.session_state.available_generators = gens
     st.session_state.available_functions = funcs
 
-
 def render_equation_block(title: str, expr: str):
     st.markdown(f"**{title}**")
     st.markdown(f"<div class='latex-box'>{expr}</div>", unsafe_allow_html=True)
-
 
 def plot_solution(expression: str, x_range: Tuple[float, float] = (-5, 5), params: Optional[Dict[str, Any]] = None):
     """Attempt to plot y(x)=<expression> using sympy if available."""
@@ -311,7 +348,6 @@ def plot_solution(expression: str, x_range: Tuple[float, float] = (-5, 5), param
     except Exception as e:
         st.info(f"Plotting skipped: {e}")
         return None
-
 
 def wait_for_job(job_id: str, *, max_secs: int = 600, poll: float = 2.0) -> Optional[Dict[str, Any]]:
     start = time.time()
@@ -342,7 +378,6 @@ def wait_for_job(job_id: str, *, max_secs: int = 600, poll: float = 2.0) -> Opti
         time.sleep(poll)
     st.error("Job timed out")
     return None
-
 
 def download_jsonl(data: List[Dict[str, Any]], filename: str = "dataset.jsonl"):
     payload = "\n".join(json.dumps(o) for o in data)
@@ -394,23 +429,22 @@ def page_dashboard():
     c3.metric("Datasets", len(st.session_state.available_datasets))
     c4.metric("Models", len(st.session_state.available_models))
 
-
 def params_controls(generator: str, key_prefix: str = "") -> Dict[str, Any]:
     col1, col2 = st.columns(2)
     params: Dict[str, Any] = {}
     with col1:
         params["alpha"] = st.slider("α (alpha)", -2.0, 2.0, 1.0, 0.1, key=f"{key_prefix}_alpha")
-        params["beta"] = st.slider("β (beta)", 0.1, 2.0, 1.0, 0.1, key=f"{key_prefix}_beta")
+        params["beta"] = st.slider("β (beta)", 0.1, 2.5, 1.0, 0.1, key=f"{key_prefix}_beta")
     with col2:
         params["M"] = st.slider("M", -1.0, 1.0, 0.0, 0.1, key=f"{key_prefix}_M")
         if generator.startswith("N"):
             params["q"] = st.slider("q (power)", 2, 5, 2, key=f"{key_prefix}_q")
             if generator in {"N2", "N3", "N6", "N7"}:
                 params["v"] = st.slider("v (power)", 2, 5, 3, key=f"{key_prefix}_v")
-        if generator in {"L4", "N6"}:
+        # Generators that use pantograph parameter 'a'
+        if generator in {"L4", "N4", "N5", "N9", "N10"}:
             params["a"] = st.slider("a (pantograph)", 2.0, 5.0, 2.0, 0.5, key=f"{key_prefix}_a")
     return params
-
 
 def page_quick_generate():
     st.title("⚡ Quick Generate")
@@ -426,7 +460,7 @@ def page_quick_generate():
     with c1:
         generator = st.selectbox("Generator", gens, index=0)
     with c2:
-        function = st.selectbox("Function", funcs, index=min(0, len(funcs)-1))
+        function = st.selectbox("Function", funcs, index=0)
 
     st.markdown("### Parameters")
     params = params_controls(generator, key_prefix="quick")
@@ -482,7 +516,6 @@ def page_quick_generate():
                 st.session_state.generated_odes = []
                 st.success("Cleared.")
 
-
 def page_batch_generation():
     st.title("📦 Batch Generation")
     probe_and_load_resources()
@@ -522,7 +555,7 @@ def page_batch_generation():
             if any(g.startswith("N") for g in selected_generators):
                 param_ranges["q"] = st.multiselect("q (power)", [2,3,4,5], default=[2,3])
                 param_ranges["v"] = st.multiselect("v (power)", [2,3,4,5], default=[2,3])
-            if any(g in {"L4","N6"} for g in selected_generators):
+            if any(g in {"L4","N4","N5","N9","N10"} for g in selected_generators):
                 param_ranges["a"] = st.multiselect("a (pantograph)", [2.0,2.5,3.0,3.5,4.0], default=[2.0])
 
     with tab3:
@@ -572,7 +605,6 @@ def page_batch_generation():
         if save_ds and results.get("dataset_info"):
             ds = results["dataset_info"]
             st.session_state.current_dataset = ds.get("name")
-            # Refresh dataset list
             dlist = api.datasets()
             st.session_state.available_datasets = dlist.get("datasets", [])
             st.info(f"Saved dataset: {ds.get('name')} ({ds.get('size',0):,} ODEs)")
@@ -595,7 +627,6 @@ def page_batch_generation():
                     st.markdown(f"<a download='batch_odes.csv' href='data:text/csv;base64,{b64}'>📥 CSV</a>", unsafe_allow_html=True)
                 else:
                     st.info("Parquet export not implemented in this single-file app.")
-
 
 def page_verify():
     st.title("✅ Verification")
@@ -648,7 +679,6 @@ def page_verify():
             if st.button("📥 Download verified set"):
                 download_jsonl(out, "verified_odes.jsonl")
 
-
 def page_datasets():
     st.title("📊 Datasets")
     if st.button("🔄 Refresh"):
@@ -692,7 +722,6 @@ def page_datasets():
         with c3:
             if st.button("🗑️ Delete (placeholder)"):
                 st.warning("Implement delete endpoint in API then wire here.")
-
 
 def page_ml_training():
     st.title("🤖 ML Training")
@@ -748,7 +777,7 @@ def page_ml_training():
             "early_stopping": cfg.get("early_stopping", True),
             "config": cfg,
         }
-        data, err = api._request("POST", "/api/v1/ml/train", json_body=body)
+        data, err = api._request_v("POST", "/ml/train", json_body=body)
         if err or not data or "job_id" not in data:
             st.error(f"Could not start training: {err or 'no response'}")
             return
@@ -765,7 +794,6 @@ def page_ml_training():
             st.session_state.available_models = api.models().get("models", [])
         else:
             st.error("Training failed or timed out.")
-
 
 def page_ml_generate():
     st.title("🧪 ML Generation")
@@ -806,7 +834,7 @@ def page_ml_generate():
             payload["generator"] = target_gen
         if target_fun != "Auto":
             payload["function"] = target_fun
-        data, err = api._request("POST", "/api/v1/ml/generate", json_body=payload)
+        data, err = api._request_v("POST", "/ml/generate", json_body=payload)
         if err or not data or "job_id" not in data:
             st.error(f"Failed to start ML generation: {err or 'no response'}")
             return
@@ -826,7 +854,6 @@ def page_ml_generate():
                     render_equation_block("Solution", f"y(x) = {ode['solution']}")
         if odes and st.button("📥 Download"):
             download_jsonl(odes, f"ml_generated_{len(odes)}.jsonl")
-
 
 def page_analysis():
     st.title("📈 Analysis")
@@ -893,7 +920,6 @@ def page_analysis():
         b64 = base64.b64encode(json.dumps({"generated_at": datetime.now().isoformat(), "summary": summary}).encode()).decode()
         st.markdown(f"<a download='analysis_report.json' href='data:application/json;base64,{b64}'>Download JSON</a>", unsafe_allow_html=True)
 
-
 def page_tools():
     st.title("🛠️ Tools & Status")
     probe_and_load_resources()
@@ -909,10 +935,10 @@ def page_tools():
     st.subheader("Probe endpoints")
     col1, col2 = st.columns(2)
     with col1:
-        d1, e1 = api._request("GET", "/api/v1/generators")
+        d1, e1 = api._request_v("GET", "/generators")
         st.code((json.dumps(d1, indent=2) if isinstance(d1, dict) else str(d1))[:800])
     with col2:
-        d2, e2 = api._request("GET", "/api/v1/functions")
+        d2, e2 = api._request_v("GET", "/functions")
         st.code((json.dumps(d2, indent=2) if isinstance(d2, dict) else str(d2))[:800])
 
     st.subheader("Prometheus metrics (first 2k chars)")
@@ -937,7 +963,6 @@ def page_tools():
                     del st.session_state[k]
             st.success("Session reset.")
 
-
 def page_docs():
     st.title("📚 Documentation")
     st.markdown(
@@ -947,10 +972,11 @@ def page_docs():
 
         **API requirements**
         - All endpoints require `X-API-Key` header
-        - Expected endpoints: `/api/v1/generate`, `/api/v1/batch_generate`, `/api/v1/verify`, `/api/v1/datasets`, `/api/v1/datasets/create`, `/api/v1/models`, `/api/v1/ml/train`, `/api/v1/ml/generate`, `/api/v1/jobs/{id}`, `/api/v1/stats`, `/metrics`, `/health`.
+        - Expected endpoints (prefix auto-added): `/generate`, `/batch_generate`, `/verify`, `/datasets`, `/datasets/create`, `/models`, `/ml/train`, `/ml/generate`, `/jobs/{id}`, `/stats`.
+        - Unversioned endpoints: `/metrics`, `/health`.
 
         **Deployment (Railway)**
-        - Add variables: `API_BASE_URL`, `API_KEY`, (optional) `USE_DEMO=1` to allow demo mode
+        - Add variables: `API_BASE_URL`, `API_KEY`, (optional) `API_PREFIX` (auto by default), and `USE_DEMO=1` to allow demo mode
         - Start command: `streamlit run streamlit_app.py --server.port $PORT --server.address 0.0.0.0`
         """
     )
@@ -967,6 +993,7 @@ def main():
         )
         st.markdown("---")
         st.caption(f"API: {API_BASE_URL}")
+        st.caption(f"Prefix: {api.prefix or '(none)'}")
         st.caption(f"Demo mode: {'ON' if USE_DEMO else 'OFF'}")
 
     if page == "🏠 Dashboard":
@@ -989,7 +1016,6 @@ def main():
         page_tools()
     else:
         page_docs()
-
 
 if __name__ == "__main__":
     main()
