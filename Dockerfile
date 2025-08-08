@@ -19,4 +19,4 @@ ENV PORT=8080 RAILWAY_ENVIRONMENT=production
 
 EXPOSE 8080
 
-CMD ["python", "-m", "uvicorn", "scripts.production_server:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "python -m uvicorn scripts.production_server:app --host 0.0.0.0 --port $PORT"]
