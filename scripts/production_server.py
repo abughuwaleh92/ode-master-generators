@@ -540,19 +540,48 @@ app = FastAPI(
     lifespan=lifespan
 )
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from starlette.responses import FileResponse
 from pathlib import Path
 
-FRONTEND_DIST = Path(__file__).resolve().parents[1] / "gui" / "gui" / "dist"
-if FRONTEND_DIST.exists():
-    app.mount("/app", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="app")
+# Path to the prebuilt GUI bundle (your repo path)
+GUI_DIR = Path(__file__).resolve().parents[1] / "ode_gui_bundle"  # repo_root/ode_gui_bundle
 
-    @app.get("/app/{path:path}")
-    async def spa_catch_all(path: str):
-        index_file = FRONTEND_DIST / "index.html"
-        if index_file.exists():
-            return FileResponse(index_file)
-        raise HTTPException(404, "UI not built")
+if GUI_DIR.exists():
+    # Serve static files (assets, css, js) at /assets, /favicon.* etc.
+    app.mount("/assets", StaticFiles(directory=GUI_DIR / "assets"), name="assets")
+    # Optionally serve any other static subfolders in your bundle:
+    # e.g., app.mount("/icons", StaticFiles(directory=GUI_DIR / "icons"), name="icons")
+
+    @app.get("/config.js")
+    async def config_js():
+        """
+        Small runtime config for the GUI so you don't have to rebuild the bundle
+        when API host/key change. Adjust variable names to match your frontend's usage.
+        """
+        api_base = os.getenv("PUBLIC_API_BASE", "")  # e.g., "https://ode.up.railway.app"
+        api_key = os.getenv("PUBLIC_API_KEY", "")    # only if you intentionally expose; otherwise leave blank
+        ws_enabled = os.getenv("ENABLE_WEBSOCKET", "true").lower() == "true"
+        content = (
+            "window.ODE_CONFIG = " +
+            json.dumps({"API_BASE": api_base, "API_KEY": api_key, "WS": ws_enabled}) +
+            ";"
+        )
+        return Response(content, media_type="application/javascript")
+
+    # Serve the SPA index.html at /
+    @app.get("/")
+    async def spa_index():
+        return FileResponse(GUI_DIR / "index.html")
+
+    # Optional: SPA fallback for unknown paths (e.g., /jobs, /datasets in client router)
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        candidate = GUI_DIR / full_path
+        if candidate.exists() and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(GUI_DIR / "index.html")
+else:
+    logger.warning(f"GUI bundle not found at {GUI_DIR}. Static UI will not be served.")
 
 # CORS middleware for Railway
 app.add_middleware(
