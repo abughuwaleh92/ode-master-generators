@@ -1,0 +1,10 @@
+
+{% extends "base.html" %}
+{% block content %}
+<h1>Datasets</h1>
+<div class="actions"><button class="btn" onclick="loadDatasets()">Refresh</button></div>
+<table id="datasets-table" class="table">
+  <thead><tr><th>Name</th><th>Size</th><th>Created</th><th>Actions</th></tr></thead>
+  <tbody></tbody>
+</table>
+{% endblock %}

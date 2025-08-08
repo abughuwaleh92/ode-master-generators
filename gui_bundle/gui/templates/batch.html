@@ -1,0 +1,32 @@
+
+{% extends "base.html" %}
+{% block content %}
+<h1>Batch Generation</h1>
+<form id="batch-form" class="form">
+  <div class="row"><label>Generators (comma separated)</label><input id="generators" placeholder="L1,L2,N1,N2"></div>
+  <div class="row"><label>Functions (comma separated)</label><input id="functions" placeholder="sine,cosine,exponential"></div>
+  <div class="row">
+    <label>Samples per combination</label><input id="samples" type="number" min="1" max="50" value="5">
+    <label><input id="verify" type="checkbox" checked> Verify</label>
+    <label><input id="save" type="checkbox" checked> Save dataset</label>
+    <label>Dataset name</label><input id="dataset-name" placeholder="optional">
+  </div>
+  <fieldset>
+    <legend>Parameter ranges (comma separated numbers)</legend>
+    <div class="grid-2">
+      <label>alpha <input id="alpha-range" placeholder="0,0.5,1,2"></label>
+      <label>beta  <input id="beta-range" placeholder="0.5,1,2"></label>
+      <label>M     <input id="M-range" placeholder="0,1"></label>
+      <label>q     <input id="q-range" placeholder="2,3,4"></label>
+      <label>v     <input id="v-range" placeholder="2,3,4"></label>
+      <label>a     <input id="a-range" placeholder="2,3,4"></label>
+    </div>
+  </fieldset>
+  <button type="button" class="btn primary" onclick="submitBatch()">Start Batch</button>
+</form>
+<div class="job-status hidden" id="job-status">
+  <h3>Job <span id="job-id"></span></h3>
+  <div id="job-progress" class="progress"><div class="bar"></div></div>
+  <pre id="job-meta" class="mini pre"></pre>
+</div>
+{% endblock %}
