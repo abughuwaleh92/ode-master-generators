@@ -1,0 +1,1620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ODE Master Generators - Complete System Interface</title>
+    
+    <!-- External Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.6.2/axios.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.js"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1e40af;
+            --secondary: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --dark: #1f2937;
+            --light: #f3f4f6;
+            --border: #e5e7eb;
+            --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: var(--dark);
+        }
+
+        .app-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-lg);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: bold;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: var(--light);
+            border-radius: 20px;
+            font-size: 14px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--secondary);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 24px;
+        }
+
+        .sidebar {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: var(--shadow-lg);
+            height: fit-content;
+            position: sticky;
+            top: 20px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+
+        .nav-item:hover {
+            background: var(--light);
+        }
+
+        .nav-item.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .nav-icon {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .content-panel {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: var(--shadow-lg);
+            min-height: 600px;
+        }
+
+        .tab-header {
+            display: flex;
+            gap: 24px;
+            border-bottom: 2px solid var(--border);
+            margin-bottom: 24px;
+        }
+
+        .tab-button {
+            padding: 12px 0;
+            border: none;
+            background: none;
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--dark);
+            cursor: pointer;
+            position: relative;
+            transition: color 0.2s;
+        }
+
+        .tab-button:hover {
+            color: var(--primary);
+        }
+
+        .tab-button.active {
+            color: var(--primary);
+        }
+
+        .tab-button.active::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--primary);
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-label {
+            font-weight: 500;
+            font-size: 14px;
+            color: var(--dark);
+        }
+
+        .form-input, .form-select {
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .form-input:focus, .form-select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .btn-secondary {
+            background: var(--light);
+            color: var(--dark);
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-success {
+            background: var(--secondary);
+            color: white;
+        }
+
+        .results-container {
+            margin-top: 24px;
+            padding: 20px;
+            background: var(--light);
+            border-radius: 8px;
+        }
+
+        .result-card {
+            background: white;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            border: 1px solid var(--border);
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .result-title {
+            font-weight: 600;
+            color: var(--dark);
+        }
+
+        .result-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .badge-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--secondary);
+        }
+
+        .badge-error {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+        }
+
+        .math-display {
+            padding: 16px;
+            background: #f9fafb;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            font-family: 'Courier New', monospace;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: bold;
+            color: var(--primary);
+            margin-bottom: 4px;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            color: #6b7280;
+        }
+
+        .chart-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            margin-bottom: 24px;
+        }
+
+        .job-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .job-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        .job-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .job-id {
+            font-weight: 600;
+            color: var(--dark);
+        }
+
+        .job-status {
+            font-size: 14px;
+            color: #6b7280;
+        }
+
+        .progress-bar {
+            width: 200px;
+            height: 8px;
+            background: var(--light);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--primary);
+            transition: width 0.3s;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-title {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .close-button {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #6b7280;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid var(--light);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            padding: 12px;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: 8px;
+            color: var(--danger);
+            margin-bottom: 16px;
+        }
+
+        .success-message {
+            padding: 12px;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            border-radius: 8px;
+            color: var(--secondary);
+            margin-bottom: 16px;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .sidebar {
+                position: static;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // Configuration
+        const CONFIG = {
+            API_BASE: window.location.origin,
+            API_KEY: 'dev-key',
+            WS_ENABLED: true,
+            REFRESH_INTERVAL: 5000
+        };
+
+        // API Client
+        class APIClient {
+            constructor(baseURL, apiKey) {
+                this.baseURL = baseURL;
+                this.apiKey = apiKey;
+                this.axios = axios.create({
+                    baseURL: baseURL,
+                    headers: {
+                        'X-API-Key': apiKey,
+                        'Content-Type': 'application/json'
+                    }
+                });
+            }
+
+            async getGenerators() {
+                const response = await this.axios.get('/api/generators');
+                return response.data;
+            }
+
+            async getFunctions() {
+                const response = await this.axios.get('/api/functions');
+                return response.data;
+            }
+
+            async generateODE(params) {
+                const response = await this.axios.post('/api/generate', params);
+                return response.data;
+            }
+
+            async batchGenerate(params) {
+                const response = await this.axios.post('/api/batch_generate', params);
+                return response.data;
+            }
+
+            async verifyODE(params) {
+                const response = await this.axios.post('/api/verify', params);
+                return response.data;
+            }
+
+            async getJobStatus(jobId) {
+                const response = await this.axios.get(`/api/jobs/${jobId}`);
+                return response.data;
+            }
+
+            async listJobs(status = null) {
+                const params = status ? { status } : {};
+                const response = await this.axios.get('/api/jobs', { params });
+                return response.data;
+            }
+
+            async cancelJob(jobId) {
+                const response = await this.axios.delete(`/api/jobs/${jobId}`);
+                return response.data;
+            }
+
+            async getDatasets() {
+                const response = await this.axios.get('/api/datasets');
+                return response.data;
+            }
+
+            async createDataset(odes, name) {
+                const response = await this.axios.post('/api/datasets/create', { odes, name });
+                return response.data;
+            }
+
+            async downloadDataset(name, format = 'jsonl') {
+                const response = await this.axios.get(`/api/datasets/${name}/download`, {
+                    params: { format },
+                    responseType: 'blob'
+                });
+                return response.data;
+            }
+
+            async trainModel(params) {
+                const response = await this.axios.post('/api/ml/train', params);
+                return response.data;
+            }
+
+            async generateWithML(params) {
+                const response = await this.axios.post('/api/ml/generate', params);
+                return response.data;
+            }
+
+            async listModels() {
+                const response = await this.axios.get('/api/ml/models');
+                return response.data;
+            }
+
+            async getStats() {
+                const response = await this.axios.get('/api/stats');
+                return response.data;
+            }
+
+            async getHealth() {
+                const response = await this.axios.get('/health');
+                return response.data;
+            }
+        }
+
+        // Main App Component
+        function App() {
+            const [activeView, setActiveView] = useState('generator');
+            const [apiClient] = useState(() => new APIClient(CONFIG.API_BASE, CONFIG.API_KEY));
+            const [systemStatus, setSystemStatus] = useState(null);
+            const [wsConnection, setWsConnection] = useState(null);
+
+            useEffect(() => {
+                // Check system health
+                checkSystemHealth();
+                const interval = setInterval(checkSystemHealth, 30000);
+
+                // Setup WebSocket
+                if (CONFIG.WS_ENABLED) {
+                    setupWebSocket();
+                }
+
+                return () => {
+                    clearInterval(interval);
+                    if (wsConnection) {
+                        wsConnection.close();
+                    }
+                };
+            }, []);
+
+            const checkSystemHealth = async () => {
+                try {
+                    const health = await apiClient.getHealth();
+                    setSystemStatus(health);
+                } catch (error) {
+                    console.error('Health check failed:', error);
+                    setSystemStatus({ status: 'error' });
+                }
+            };
+
+            const setupWebSocket = () => {
+                const ws = new WebSocket(`${CONFIG.API_BASE.replace('http', 'ws')}/ws/client-${Date.now()}`);
+                
+                ws.onopen = () => {
+                    console.log('WebSocket connected');
+                    setWsConnection(ws);
+                };
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    handleWebSocketMessage(data);
+                };
+
+                ws.onclose = () => {
+                    console.log('WebSocket disconnected');
+                    setWsConnection(null);
+                    // Reconnect after 5 seconds
+                    setTimeout(setupWebSocket, 5000);
+                };
+            };
+
+            const handleWebSocketMessage = (data) => {
+                // Handle real-time updates
+                console.log('WebSocket message:', data);
+            };
+
+            return (
+                <div className="app-container">
+                    <Header systemStatus={systemStatus} />
+                    
+                    <div className="main-content">
+                        <Sidebar activeView={activeView} setActiveView={setActiveView} />
+                        
+                        <div className="content-panel">
+                            {activeView === 'generator' && <GeneratorView apiClient={apiClient} />}
+                            {activeView === 'batch' && <BatchGeneratorView apiClient={apiClient} />}
+                            {activeView === 'verification' && <VerificationView apiClient={apiClient} />}
+                            {activeView === 'datasets' && <DatasetsView apiClient={apiClient} />}
+                            {activeView === 'jobs' && <JobsView apiClient={apiClient} />}
+                            {activeView === 'ml' && <MLPipelineView apiClient={apiClient} />}
+                            {activeView === 'analytics' && <AnalyticsView apiClient={apiClient} />}
+                            {activeView === 'settings' && <SettingsView />}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Header Component
+        function Header({ systemStatus }) {
+            return (
+                <div className="header">
+                    <h1>🔬 ODE Master Generators</h1>
+                    <div className="status-bar">
+                        <div className="status-indicator">
+                            <div className="status-dot" style={{
+                                background: systemStatus?.status === 'healthy' ? '#10b981' : '#ef4444'
+                            }}></div>
+                            <span>System {systemStatus?.status || 'checking...'}</span>
+                        </div>
+                        {systemStatus?.services && (
+                            <>
+                                <div className="status-indicator">
+                                    <span>ML: {systemStatus.services.ml_pipeline ? '✓' : '✗'}</span>
+                                </div>
+                                <div className="status-indicator">
+                                    <span>Cache: {systemStatus.services.cache ? '✓' : '✗'}</span>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // Sidebar Component
+        function Sidebar({ activeView, setActiveView }) {
+            const menuItems = [
+                { id: 'generator', label: 'ODE Generator', icon: '⚡' },
+                { id: 'batch', label: 'Batch Generation', icon: '📦' },
+                { id: 'verification', label: 'Verification', icon: '✓' },
+                { id: 'datasets', label: 'Datasets', icon: '💾' },
+                { id: 'jobs', label: 'Jobs', icon: '⚙️' },
+                { id: 'ml', label: 'ML Pipeline', icon: '🤖' },
+                { id: 'analytics', label: 'Analytics', icon: '📊' },
+                { id: 'settings', label: 'Settings', icon: '⚙️' }
+            ];
+
+            return (
+                <div className="sidebar">
+                    {menuItems.map(item => (
+                        <div
+                            key={item.id}
+                            className={`nav-item ${activeView === item.id ? 'active' : ''}`}
+                            onClick={() => setActiveView(item.id)}
+                        >
+                            <span className="nav-icon">{item.icon}</span>
+                            <span>{item.label}</span>
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+
+        // Generator View Component
+        function GeneratorView({ apiClient }) {
+            const [generators, setGenerators] = useState([]);
+            const [functions, setFunctions] = useState([]);
+            const [formData, setFormData] = useState({
+                generator: '',
+                function: '',
+                count: 1,
+                verify: true,
+                parameters: {
+                    alpha: 1.0,
+                    beta: 1.0,
+                    M: 0.0,
+                    q: 2,
+                    v: 3,
+                    a: 2
+                }
+            });
+            const [loading, setLoading] = useState(false);
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState(null);
+
+            useEffect(() => {
+                loadOptions();
+            }, []);
+
+            const loadOptions = async () => {
+                try {
+                    const [genData, funcData] = await Promise.all([
+                        apiClient.getGenerators(),
+                        apiClient.getFunctions()
+                    ]);
+                    setGenerators(genData.all || []);
+                    setFunctions(funcData.functions || []);
+                    
+                    // Set defaults
+                    if (genData.all?.length > 0) {
+                        setFormData(prev => ({ ...prev, generator: genData.all[0] }));
+                    }
+                    if (funcData.functions?.length > 0) {
+                        setFormData(prev => ({ ...prev, function: funcData.functions[0] }));
+                    }
+                } catch (error) {
+                    setError('Failed to load options');
+                }
+            };
+
+            const handleGenerate = async () => {
+                setLoading(true);
+                setError(null);
+                setResult(null);
+
+                try {
+                    const response = await apiClient.generateODE(formData);
+                    
+                    if (response.job_id) {
+                        // Poll for job completion
+                        pollJobStatus(response.job_id);
+                    } else {
+                        setResult(response);
+                    }
+                } catch (error) {
+                    setError(error.message || 'Generation failed');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const pollJobStatus = async (jobId) => {
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const status = await apiClient.getJobStatus(jobId);
+                        
+                        if (status.status === 'completed') {
+                            clearInterval(pollInterval);
+                            setResult(status.results);
+                        } else if (status.status === 'failed') {
+                            clearInterval(pollInterval);
+                            setError(status.error || 'Job failed');
+                        }
+                    } catch (error) {
+                        clearInterval(pollInterval);
+                        setError('Failed to check job status');
+                    }
+                }, 1000);
+            };
+
+            return (
+                <div>
+                    <h2>ODE Generator</h2>
+                    
+                    <div className="form-grid">
+                        <div className="form-group">
+                            <label className="form-label">Generator</label>
+                            <select
+                                className="form-select"
+                                value={formData.generator}
+                                onChange={(e) => setFormData({ ...formData, generator: e.target.value })}
+                            >
+                                {generators.map(gen => (
+                                    <option key={gen} value={gen}>{gen}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Function</label>
+                            <select
+                                className="form-select"
+                                value={formData.function}
+                                onChange={(e) => setFormData({ ...formData, function: e.target.value })}
+                            >
+                                {functions.map(func => (
+                                    <option key={func} value={func}>{func}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Count</label>
+                            <input
+                                type="number"
+                                className="form-input"
+                                value={formData.count}
+                                min="1"
+                                max="100"
+                                onChange={(e) => setFormData({ ...formData, count: parseInt(e.target.value) })}
+                            />
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">
+                                <input
+                                    type="checkbox"
+                                    checked={formData.verify}
+                                    onChange={(e) => setFormData({ ...formData, verify: e.target.checked })}
+                                />
+                                {' '}Verify Solutions
+                            </label>
+                        </div>
+                    </div>
+
+                    <div className="form-grid">
+                        <div className="form-group">
+                            <label className="form-label">α (Alpha)</label>
+                            <input
+                                type="number"
+                                className="form-input"
+                                value={formData.parameters.alpha}
+                                step="0.1"
+                                onChange={(e) => setFormData({
+                                    ...formData,
+                                    parameters: { ...formData.parameters, alpha: parseFloat(e.target.value) }
+                                })}
+                            />
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">β (Beta)</label>
+                            <input
+                                type="number"
+                                className="form-input"
+                                value={formData.parameters.beta}
+                                step="0.1"
+                                onChange={(e) => setFormData({
+                                    ...formData,
+                                    parameters: { ...formData.parameters, beta: parseFloat(e.target.value) }
+                                })}
+                            />
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">M</label>
+                            <input
+                                type="number"
+                                className="form-input"
+                                value={formData.parameters.M}
+                                step="0.1"
+                                onChange={(e) => setFormData({
+                                    ...formData,
+                                    parameters: { ...formData.parameters, M: parseFloat(e.target.value) }
+                                })}
+                            />
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">q</label>
+                            <input
+                                type="number"
+                                className="form-input"
+                                value={formData.parameters.q}
+                                min="1"
+                                max="10"
+                                onChange={(e) => setFormData({
+                                    ...formData,
+                                    parameters: { ...formData.parameters, q: parseInt(e.target.value) }
+                                })}
+                            />
+                        </div>
+                    </div>
+
+                    <button 
+                        className="btn btn-primary" 
+                        onClick={handleGenerate}
+                        disabled={loading}
+                    >
+                        {loading ? (
+                            <>
+                                <span className="loading-spinner"></span>
+                                Generating...
+                            </>
+                        ) : (
+                            <>⚡ Generate ODE</>
+                        )}
+                    </button>
+
+                    {error && (
+                        <div className="error-message">{error}</div>
+                    )}
+
+                    {result && (
+                        <div className="results-container">
+                            <h3>Generated ODEs</h3>
+                            {Array.isArray(result) ? (
+                                result.map((ode, index) => (
+                                    <ODEResultCard key={index} ode={ode} />
+                                ))
+                            ) : (
+                                <ODEResultCard ode={result} />
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ODE Result Card Component
+        function ODEResultCard({ ode }) {
+            useEffect(() => {
+                // Render LaTeX
+                if (window.MathJax) {
+                    window.MathJax.typesetPromise();
+                }
+            }, [ode]);
+
+            return (
+                <div className="result-card">
+                    <div className="result-header">
+                        <span className="result-title">
+                            {ode.generator} - {ode.function}
+                        </span>
+                        <span className={`result-badge ${ode.verified ? 'badge-success' : 'badge-error'}`}>
+                            {ode.verified ? 'Verified' : 'Not Verified'}
+                        </span>
+                    </div>
+
+                    <div className="math-display">
+                        <strong>ODE:</strong>
+                        <div>{ode.ode}</div>
+                    </div>
+
+                    <div className="math-display">
+                        <strong>Solution:</strong>
+                        <div>{ode.solution}</div>
+                    </div>
+
+                    {ode.verification && (
+                        <div style={{ marginTop: '12px' }}>
+                            <strong>Verification:</strong>
+                            <div>Method: {ode.verification.method}</div>
+                            <div>Confidence: {(ode.verification.confidence * 100).toFixed(1)}%</div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Jobs View Component
+        function JobsView({ apiClient }) {
+            const [jobs, setJobs] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [filter, setFilter] = useState('all');
+
+            useEffect(() => {
+                loadJobs();
+                const interval = setInterval(loadJobs, 2000);
+                return () => clearInterval(interval);
+            }, [filter]);
+
+            const loadJobs = async () => {
+                try {
+                    const response = await apiClient.listJobs(filter === 'all' ? null : filter);
+                    setJobs(response.jobs || []);
+                } catch (error) {
+                    console.error('Failed to load jobs:', error);
+                }
+            };
+
+            const handleCancel = async (jobId) => {
+                try {
+                    await apiClient.cancelJob(jobId);
+                    loadJobs();
+                } catch (error) {
+                    console.error('Failed to cancel job:', error);
+                }
+            };
+
+            return (
+                <div>
+                    <h2>Jobs</h2>
+
+                    <div className="tab-header">
+                        <button 
+                            className={`tab-button ${filter === 'all' ? 'active' : ''}`}
+                            onClick={() => setFilter('all')}
+                        >
+                            All
+                        </button>
+                        <button 
+                            className={`tab-button ${filter === 'queued' ? 'active' : ''}`}
+                            onClick={() => setFilter('queued')}
+                        >
+                            Queued
+                        </button>
+                        <button 
+                            className={`tab-button ${filter === 'running' ? 'active' : ''}`}
+                            onClick={() => setFilter('running')}
+                        >
+                            Running
+                        </button>
+                        <button 
+                            className={`tab-button ${filter === 'completed' ? 'active' : ''}`}
+                            onClick={() => setFilter('completed')}
+                        >
+                            Completed
+                        </button>
+                        <button 
+                            className={`tab-button ${filter === 'failed' ? 'active' : ''}`}
+                            onClick={() => setFilter('failed')}
+                        >
+                            Failed
+                        </button>
+                    </div>
+
+                    <div className="job-list">
+                        {jobs.map(job => (
+                            <div key={job.job_id} className="job-item">
+                                <div className="job-info">
+                                    <span className="job-id">{job.job_id}</span>
+                                    <span className="job-status">
+                                        Status: {job.status} | Progress: {job.progress.toFixed(0)}%
+                                    </span>
+                                </div>
+                                
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                    <div className="progress-bar">
+                                        <div 
+                                            className="progress-fill" 
+                                            style={{ width: `${job.progress}%` }}
+                                        ></div>
+                                    </div>
+                                    
+                                    {job.status === 'running' || job.status === 'queued' ? (
+                                        <button 
+                                            className="btn btn-danger"
+                                            onClick={() => handleCancel(job.job_id)}
+                                        >
+                                            Cancel
+                                        </button>
+                                    ) : null}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        // Additional view components would continue here...
+        // Including: BatchGeneratorView, VerificationView, DatasetsView, MLPipelineView, AnalyticsView, SettingsView
+
+        // Batch Generator View
+        function BatchGeneratorView({ apiClient }) {
+            const [formData, setFormData] = useState({
+                generators: [],
+                functions: [],
+                samples_per_combination: 5,
+                verify: true,
+                save_dataset: true,
+                dataset_name: ''
+            });
+            const [availableGenerators, setAvailableGenerators] = useState([]);
+            const [availableFunctions, setAvailableFunctions] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [result, setResult] = useState(null);
+
+            useEffect(() => {
+                loadOptions();
+            }, []);
+
+            const loadOptions = async () => {
+                try {
+                    const [genData, funcData] = await Promise.all([
+                        apiClient.getGenerators(),
+                        apiClient.getFunctions()
+                    ]);
+                    setAvailableGenerators(genData.all || []);
+                    setAvailableFunctions(funcData.functions || []);
+                } catch (error) {
+                    console.error('Failed to load options:', error);
+                }
+            };
+
+            const handleSubmit = async () => {
+                setLoading(true);
+                try {
+                    const response = await apiClient.batchGenerate(formData);
+                    setResult(response);
+                } catch (error) {
+                    console.error('Batch generation failed:', error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div>
+                    <h2>Batch Generation</h2>
+                    
+                    <div className="form-group">
+                        <label className="form-label">Select Generators</label>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                            {availableGenerators.map(gen => (
+                                <label key={gen} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={formData.generators.includes(gen)}
+                                        onChange={(e) => {
+                                            if (e.target.checked) {
+                                                setFormData({ ...formData, generators: [...formData.generators, gen] });
+                                            } else {
+                                                setFormData({ ...formData, generators: formData.generators.filter(g => g !== gen) });
+                                            }
+                                        }}
+                                    />
+                                    {gen}
+                                </label>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="form-group">
+                        <label className="form-label">Select Functions</label>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                            {availableFunctions.map(func => (
+                                <label key={func} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={formData.functions.includes(func)}
+                                        onChange={(e) => {
+                                            if (e.target.checked) {
+                                                setFormData({ ...formData, functions: [...formData.functions, func] });
+                                            } else {
+                                                setFormData({ ...formData, functions: formData.functions.filter(f => f !== func) });
+                                            }
+                                        }}
+                                    />
+                                    {func}
+                                </label>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="form-grid">
+                        <div className="form-group">
+                            <label className="form-label">Samples per Combination</label>
+                            <input
+                                type="number"
+                                className="form-input"
+                                value={formData.samples_per_combination}
+                                min="1"
+                                max="50"
+                                onChange={(e) => setFormData({ ...formData, samples_per_combination: parseInt(e.target.value) })}
+                            />
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Dataset Name (optional)</label>
+                            <input
+                                type="text"
+                                className="form-input"
+                                value={formData.dataset_name}
+                                placeholder="Leave empty for auto-generated name"
+                                onChange={(e) => setFormData({ ...formData, dataset_name: e.target.value })}
+                            />
+                        </div>
+                    </div>
+
+                    <button 
+                        className="btn btn-primary"
+                        onClick={handleSubmit}
+                        disabled={loading || formData.generators.length === 0 || formData.functions.length === 0}
+                    >
+                        {loading ? 'Generating...' : 'Start Batch Generation'}
+                    </button>
+
+                    {result && (
+                        <div className="success-message">
+                            Batch generation started! Job ID: {result.job_id}
+                            <br />
+                            Expected ODEs: {result.total_expected}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Analytics View
+        function AnalyticsView({ apiClient }) {
+            const [stats, setStats] = useState(null);
+            const chartRef = useRef(null);
+            const chartInstance = useRef(null);
+
+            useEffect(() => {
+                loadStats();
+                const interval = setInterval(loadStats, 5000);
+                return () => {
+                    clearInterval(interval);
+                    if (chartInstance.current) {
+                        chartInstance.current.destroy();
+                    }
+                };
+            }, []);
+
+            const loadStats = async () => {
+                try {
+                    const data = await apiClient.getStats();
+                    setStats(data);
+                    updateChart(data);
+                } catch (error) {
+                    console.error('Failed to load stats:', error);
+                }
+            };
+
+            const updateChart = (data) => {
+                if (!chartRef.current || !data) return;
+
+                const ctx = chartRef.current.getContext('2d');
+                
+                if (chartInstance.current) {
+                    chartInstance.current.destroy();
+                }
+
+                chartInstance.current = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: Object.keys(data.queue_stats || {}),
+                        datasets: [{
+                            label: 'Queued Jobs',
+                            data: Object.values(data.queue_stats || {}),
+                            backgroundColor: 'rgba(37, 99, 235, 0.6)',
+                            borderColor: 'rgba(37, 99, 235, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            };
+
+            return (
+                <div>
+                    <h2>Analytics & Statistics</h2>
+
+                    {stats && (
+                        <>
+                            <div className="stats-grid">
+                                <div className="stat-card">
+                                    <div className="stat-value">{stats.statistics.total_generated_24h}</div>
+                                    <div className="stat-label">Generated (24h)</div>
+                                </div>
+                                <div className="stat-card">
+                                    <div className="stat-value">{(stats.statistics.verification_rate * 100).toFixed(1)}%</div>
+                                    <div className="stat-label">Verification Rate</div>
+                                </div>
+                                <div className="stat-card">
+                                    <div className="stat-value">{stats.statistics.active_jobs}</div>
+                                    <div className="stat-label">Active Jobs</div>
+                                </div>
+                                <div className="stat-card">
+                                    <div className="stat-value">{stats.statistics.total_jobs}</div>
+                                    <div className="stat-label">Total Jobs</div>
+                                </div>
+                            </div>
+
+                            <div className="chart-container" style={{ height: '300px' }}>
+                                <h3>Job Queue Status</h3>
+                                <canvas ref={chartRef}></canvas>
+                            </div>
+
+                            <div className="stat-card">
+                                <h3>System Capabilities</h3>
+                                <div>Generators: {stats.capabilities.generators}</div>
+                                <div>Functions: {stats.capabilities.functions}</div>
+                                <div>ML Enabled: {stats.capabilities.ml_enabled ? 'Yes' : 'No'}</div>
+                                <div>Redis Enabled: {stats.capabilities.redis_enabled ? 'Yes' : 'No'}</div>
+                            </div>
+                        </>
+                    )}
+                </div>
+            );
+        }
+
+        // Verification View
+        function VerificationView({ apiClient }) {
+            const [formData, setFormData] = useState({
+                ode: '',
+                solution: '',
+                method: 'substitution'
+            });
+            const [result, setResult] = useState(null);
+            const [loading, setLoading] = useState(false);
+
+            const handleVerify = async () => {
+                setLoading(true);
+                try {
+                    const response = await apiClient.verifyODE(formData);
+                    setResult(response);
+                } catch (error) {
+                    console.error('Verification failed:', error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div>
+                    <h2>ODE Verification</h2>
+                    
+                    <div className="form-group">
+                        <label className="form-label">ODE Equation</label>
+                        <textarea
+                            className="form-input"
+                            rows="3"
+                            placeholder="Enter ODE equation (e.g., Eq(y''(x) + y(x), sin(x)))"
+                            value={formData.ode}
+                            onChange={(e) => setFormData({ ...formData, ode: e.target.value })}
+                        />
+                    </div>
+
+                    <div className="form-group">
+                        <label className="form-label">Solution</label>
+                        <textarea
+                            className="form-input"
+                            rows="3"
+                            placeholder="Enter solution (e.g., sin(x) + cos(x))"
+                            value={formData.solution}
+                            onChange={(e) => setFormData({ ...formData, solution: e.target.value })}
+                        />
+                    </div>
+
+                    <div className="form-group">
+                        <label className="form-label">Verification Method</label>
+                        <select
+                            className="form-select"
+                            value={formData.method}
+                            onChange={(e) => setFormData({ ...formData, method: e.target.value })}
+                        >
+                            <option value="substitution">Substitution</option>
+                            <option value="numerical">Numerical</option>
+                            <option value="series">Series</option>
+                        </select>
+                    </div>
+
+                    <button 
+                        className="btn btn-primary"
+                        onClick={handleVerify}
+                        disabled={loading || !formData.ode || !formData.solution}
+                    >
+                        {loading ? 'Verifying...' : 'Verify ODE'}
+                    </button>
+
+                    {result && (
+                        <div className={result.verified ? 'success-message' : 'error-message'}>
+                            <strong>Verification Result:</strong>
+                            <div>Status: {result.verified ? 'Verified ✓' : 'Not Verified ✗'}</div>
+                            <div>Method: {result.method}</div>
+                            <div>Confidence: {(result.confidence * 100).toFixed(1)}%</div>
+                            {result.error && <div>Error: {result.error}</div>}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Datasets View
+        function DatasetsView({ apiClient }) {
+            const [datasets, setDatasets] = useState([]);
+            const [loading, setLoading] = useState(false);
+
+            useEffect(() => {
+                loadDatasets();
+            }, []);
+
+            const loadDatasets = async () => {
+                setLoading(true);
+                try {
+                    const response = await apiClient.getDatasets();
+                    setDatasets(response.datasets || []);
+                } catch (error) {
+                    console.error('Failed to load datasets:', error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleDownload = async (name, format) => {
+                try {
+                    const blob = await apiClient.downloadDataset(name, format);
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${name}.${format}`;
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                } catch (error) {
+                    console.error('Download failed:', error);
+                }
+            };
+
+            return (
+                <div>
+                    <h2>Datasets</h2>
+                    
+                    {loading ? (
+                        <div>Loading datasets...</div>
+                    ) : (
+                        <div className="job-list">
+                            {datasets.map(dataset => (
+                                <div key={dataset.name} className="job-item">
+                                    <div className="job-info">
+                                        <span className="job-id">{dataset.name}</span>
+                                        <span className="job-status">
+                                            Size: {(dataset.size_bytes / 1024).toFixed(2)} KB | 
+                                            Created: {new Date(dataset.created_at).toLocaleDateString()}
+                                        </span>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                        <button 
+                                            className="btn btn-secondary"
+                                            onClick={() => handleDownload(dataset.name, 'jsonl')}
+                                        >
+                                            Download JSONL
+                                        </button>
+                                        <button 
+                                            className="btn btn-secondary"
+                                            onClick={() => handleDownload(dataset.name, 'csv')}
+                                        >
+                                            Download CSV
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ML Pipeline View
+        function MLPipelineView({ apiClient }) {
+            const [models, setModels] = useState([]);
+            const [datasets, setDatasets] = useState([]);
+            const [activeTab, setActiveTab] = useState('train');
+
+            useEffect(() => {
+                loadResources();
+            }, []);
+
+            const loadResources = async () => {
+                try {
+                    const [modelsData, datasetsData] = await Promise.all([
+                        apiClient.listModels(),
+                        apiClient.getDatasets()
+                    ]);
+                    setModels(modelsData.models || []);
+                    setDatasets(datasetsData.datasets || []);
+                } catch (error) {
+                    console.error('Failed to load ML resources:', error);
+                }
+            };
+
+            return (
+                <div>
+                    <h2>ML Pipeline</h2>
+                    
+                    <div className="tab-header">
+                        <button 
+                            className={`tab-button ${activeTab === 'train' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('train')}
+                        >
+                            Train Model
+                        </button>
+                        <button 
+                            className={`tab-button ${activeTab === 'generate' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('generate')}
+                        >
+                            Generate with ML
+                        </button>
+                        <button 
+                            className={`tab-button ${activeTab === 'models' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('models')}
+                        >
+                            Models
+                        </button>
+                    </div>
+
+                    {activeTab === 'models' && (
+                        <div className="job-list">
+                            {models.map(model => (
+                                <div key={model.name} className="job-item">
+                                    <div className="job-info">
+                                        <span className="job-id">{model.name}</span>
+                                        <span className="job-status">
+                                            Size: {(model.size_bytes / (1024 * 1024)).toFixed(2)} MB | 
+                                            Created: {new Date(model.created_at).toLocaleDateString()}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {activeTab === 'train' && (
+                        <div className="form-grid">
+                            <div className="form-group">
+                                <label className="form-label">Dataset</label>
+                                <select className="form-select">
+                                    {datasets.map(ds => (
+                                        <option key={ds.name} value={ds.name}>{ds.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label">Model Type</label>
+                                <select className="form-select">
+                                    <option value="pattern_net">Pattern Network</option>
+                                    <option value="transformer">Transformer</option>
+                                    <option value="vae">VAE</option>
+                                </select>
+                            </div>
+                            <button className="btn btn-primary">Start Training</button>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Settings View
+        function SettingsView() {
+            return (
+                <div>
+                    <h2>Settings</h2>
+                    <div className="form-group">
+                        <label className="form-label">API Key</label>
+                        <input type="text" className="form-input" value={CONFIG.API_KEY} readOnly />
+                    </div>
+                    <div className="form-group">
+                        <label className="form-label">API Base URL</label>
+                        <input type="text" className="form-input" value={CONFIG.API_BASE} readOnly />
+                    </div>
+                    <div className="form-group">
+                        <label className="form-label">WebSocket Enabled</label>
+                        <input type="checkbox" checked={CONFIG.WS_ENABLED} readOnly />
+                    </div>
+                </div>
+            );
+        }
+
+        // Mount the app
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
