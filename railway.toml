@@ -1,5 +1,11 @@
+# Railway.toml
 [build]
 builder = "NIXPACKS"
+nixpacksConfigPath = "nixpacks.toml"
+# optional: only rebuild when these change
+# watchPatterns = ["scripts/**", "ode_gui_bundle/**", "requirements.txt", "nixpacks.toml", "Railway.toml"]
 
-[build.nixpacksPlan.phases.setup]
-nixPkgs = ["python39"]
+[deploy]
+# You can set a start command here OR rely on nixpacks.toml [start].
+# startCommand below will override the nixpacks start if present.
+startCommand = "python -m uvicorn scripts.production_server:app --host 0.0.0.0 --port ${PORT:-8080}"
