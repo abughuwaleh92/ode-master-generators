@@ -1,0 +1,20 @@
+# nixpacks.toml
+# Force Python provider and skip Node so it doesn't try to run npm/vite.
+providers = ["python"]
+
+[variables]
+NIXPACKS_SKIP_NODE = "true"
+
+[phases.setup]
+# Pick a Python you want. 3.11 recommended.
+nixPkgs = ["python311", "pip", "gcc", "gnumake"]
+
+[phases.install]
+cmds = [
+  "pip install --upgrade pip",
+  "pip install -r requirements.txt"
+]
+
+[start]
+# Using python -m avoids PATH issues some users hit with uvicorn
+cmd = "python -m uvicorn scripts.production_server:app --host 0.0.0.0 --port ${PORT:-8080}"
