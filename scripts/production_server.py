@@ -539,6 +539,13 @@ app = FastAPI(
     version="3.0.0",
     lifespan=lifespan
 )
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+from gui.gui.ui import router as ui_router  # import your GUI router
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+app.mount("/static", StaticFiles(directory=BASE_DIR / "gui" / "gui" / "static"), name="static")
+app.include_router(ui_router, prefix="/ui", tags=["gui"])
 
 # CORS middleware for Railway
 app.add_middleware(
