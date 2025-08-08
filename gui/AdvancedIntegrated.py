@@ -148,16 +148,20 @@ class APIClient:
     def _try_endpoints(self, path: str, method: str = "GET", 
                        json_body: Any = None, timeout: int = REQUEST_TIMEOUT) -> Tuple[Optional[Any], Optional[str], str]:
         """Try multiple endpoint variations to find the working one"""
-        # Possible endpoint patterns
-        variations = [
-            f"{self.base_url}{path}",  # Direct path
-            f"{self.base_url}/api/v1{path}",  # With /api/v1 prefix
-            f"{self.base_url}/api{path}",  # With /api prefix
-        ]
+        # Possible endpoint patterns - order matters!
+        variations = []
         
-        # Also try without any prefix for health/metrics
-        if path in ["/health", "/metrics"]:
-            variations.insert(0, f"{self.base_url}{path}")
+        # For health/metrics, try root first
+        if path in ["/health", "/metrics", "/"]:
+            variations.append(f"{self.base_url}{path}")
+        else:
+            # Try these patterns in order
+            variations.extend([
+                f"{self.base_url}{path}",  # Direct path (no prefix)
+                f"{self.base_url}/api/v1{path}",  # With /api/v1 prefix
+                f"{self.base_url}/api{path}",  # With /api prefix
+                f"{self.base_url}/v1{path}",  # With /v1 prefix
+            ])
         
         last_error = None
         for url in variations:
@@ -353,6 +357,20 @@ api = APIClient(API_BASE_URL, API_KEY)
 def check_api_connection() -> Tuple[bool, str]:
     """Check API connection and return status"""
     try:
+        # First, try to reach the root endpoint to see if API is up
+        root_response, root_error, root_url = api._try_endpoints("/", timeout=5)
+        
+        if root_response and isinstance(root_response, dict):
+            # API is responding, check for available endpoints
+            endpoints = root_response.get("endpoints", {})
+            if endpoints:
+                st.session_state.api_status = {
+                    "status": "connected",
+                    "root_response": root_response,
+                    "endpoints": endpoints
+                }
+        
+        # Now try health endpoint
         health = api.health()
         
         if health.get("status") in ["healthy", "ok", "operational"]:
@@ -368,24 +386,28 @@ def check_api_connection() -> Tuple[bool, str]:
                 st.session_state.available_generators = gens
                 st.session_state.available_functions = funcs
                 st.session_state.using_demo = False
-                return True, "API connected successfully"
+                return True, f"API connected successfully ({len(gens)} generators, {len(funcs)} functions)"
             elif USE_DEMO:
                 # API is up but no generators/functions, use demo
                 st.session_state.available_generators = DEMO_GENERATORS
                 st.session_state.available_functions = DEMO_FUNCTIONS
                 st.session_state.using_demo = True
-                return True, "API connected (using demo data)"
+                return True, "API connected but using demo data (no generators/functions from API)"
             else:
                 return False, "API connected but no generators/functions available"
         else:
-            error_msg = health.get("error", "API unhealthy")
+            # Check if we at least got a response from root
+            if root_response:
+                error_msg = f"API responding but health check failed: {health.get('error', 'unknown')}"
+            else:
+                error_msg = health.get("error", "Cannot reach API")
             
             if USE_DEMO:
                 st.session_state.available_generators = DEMO_GENERATORS
                 st.session_state.available_functions = DEMO_FUNCTIONS
                 st.session_state.using_demo = True
                 st.session_state.api_reachable = False
-                return True, f"API unreachable ({error_msg}), using demo mode"
+                return True, f"Using demo mode ({error_msg})"
             else:
                 st.session_state.api_reachable = False
                 return False, error_msg
@@ -396,7 +418,7 @@ def check_api_connection() -> Tuple[bool, str]:
             st.session_state.available_functions = DEMO_FUNCTIONS
             st.session_state.using_demo = True
             st.session_state.api_reachable = False
-            return True, f"Cannot connect to API ({str(e)}), using demo mode"
+            return True, f"Using demo mode (Connection error: {str(e)[:100]})"
         else:
             st.session_state.api_reachable = False
             return False, f"Cannot connect to API: {str(e)}"
