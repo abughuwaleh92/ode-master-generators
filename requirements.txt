@@ -112,7 +112,7 @@ python-jose[cryptography]==3.3.0
 
 # Deployment
 gunicorn==21.2.0
-
+jinja2 
 # ============================================
 # Railway-specific optimizations
 # ============================================
