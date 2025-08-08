@@ -1,37 +1,47 @@
-# gui/integrated_interface.py
 """
-ODE Master Generator — Integrated Streamlit Interface
-- Generation (single & batch)
-- Verification
-- Dataset management
-- ML training & ML-based generation
-- Analysis & system tools
-Designed for Railway deployment.
+Streamlit GUI for ODE Master Generator — Railway-ready
+------------------------------------------------------
+
+• Single-file Streamlit app designed for Railway deployment
+• Robust API client with response-shape normalization and clear errors
+• Polished UI + sections: Dashboard, Quick Generate, Batch, Verify, Datasets,
+  ML Train, ML Generate, Analysis, Tools, Docs
+• Demo fallback so the UI still works when API is unreachable (set USE_DEMO=1)
+
+Env vars expected (Railway → Variables):
+  API_BASE_URL=https://your-api.yourdomain.tld
+  API_KEY=xxxxxxxxxxxxxxxx
+  USE_DEMO=0|1 (optional)
+
+Start command for Railway (example):
+  streamlit run streamlit_app.py --server.port $PORT --server.address 0.0.0.0
 """
 
 from __future__ import annotations
 
 import os
-import json
 import time
+import json
 import base64
 import logging
-import asyncio
-from io import BytesIO
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-import aiohttp
 import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
-import plotly.graph_objs as go
 import plotly.express as px
+import plotly.graph_objects as go
 
-# --------------------------- #
-#        Page Settings        #
-# --------------------------- #
+# Optional but nice to have for latex & parsing of expressions
+try:
+    import sympy as sp
+    from sympy.parsing.sympy_parser import parse_expr
+except Exception:  # pragma: no cover
+    sp = None
+
+# ---------- Config ----------
 
 st.set_page_config(
     page_title="ODE Master Generator",
@@ -40,658 +50,678 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# --------------------------- #
-#       Global Settings       #
-# --------------------------- #
-
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("ode-ui")
-
-API_BASE_URL = os.getenv("API_BASE_URL", "https://ode-api-production.up.railway.app").rstrip("/")
+API_BASE_URL = (os.getenv("API_BASE_URL") or "https://ode-api-production.up.railway.app").rstrip("/")
 API_KEY = os.getenv("API_KEY", "test-key")
+USE_DEMO = str(os.getenv("USE_DEMO", "0")).lower() in {"1", "true", "yes"}
+REQUEST_TIMEOUT = 30
 
-# --------------------------- #
-#           Styles            #
-# --------------------------- #
+# ---------- Styling ----------
 
 st.markdown(
     """
-<style>
-.stApp { background-color: #f8fafc; }
-.block-container { padding-top: 1.5rem; }
-.section { margin: 1.0rem 0 0.75rem 0; font-weight: 700; font-size: 1.05rem; }
-.card { background: #fff; border-radius: 12px; padding: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
-.metric-card { background:#fff;border-radius:12px;padding:1rem;text-align:center;box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-.badge { display:inline-block;padding:.2rem .5rem;border-radius:999px;font-size:.80rem; }
-.badge-ok { background:#dcfce7;color:#166534;border:1px solid #22c55e; }
-.badge-bad { background:#fee2e2;color:#991b1b;border:1px solid #ef4444; }
-.small { color:#64748b;font-size:.85rem; }
-.latex { font-family: 'Computer Modern', 'Times New Roman', serif; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:.75rem; overflow-x:auto; }
-</style>
+    <style>
+      .app-header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:20px 24px;border-radius:14px;color:#fff;margin-bottom:18px;box-shadow:0 8px 20px rgba(0,0,0,.08)}
+      .metric-card{background:#fff;padding:14px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+      .info-box{background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px}
+      .warn-box{background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px}
+      .ok-dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#10b981;margin-right:8px;box-shadow:0 0 8px #10b981}
+      .bad-dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;margin-right:8px;box-shadow:0 0 8px #ef4444}
+      .latex-box{font-size:1.05em;padding:10px;border-radius:8px;background:#f8fafc;border:1px solid #e5e7eb;overflow-x:auto}
+    </style>
     """,
     unsafe_allow_html=True,
 )
 
-# --------------------------- #
-#         API Client          #
-# --------------------------- #
+# ---------- Session ----------
 
-class ODEAPI:
-    def __init__(self, base_url: str, api_key: str, timeout: int = 30):
-        self.base = base_url.rstrip("/")
-        self.headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
-        self.timeout = timeout
+def _init_state():
+    ss = st.session_state
+    ss.setdefault("api_status", None)
+    ss.setdefault("available_generators", [])
+    ss.setdefault("available_functions", [])
+    ss.setdefault("generated_odes", [])
+    ss.setdefault("batch_dataset", [])
+    ss.setdefault("current_dataset", None)
+    ss.setdefault("available_datasets", [])
+    ss.setdefault("available_models", [])
+    ss.setdefault("trained_models", [])
+    ss.setdefault("ml_generated_odes", [])
 
-    # ---- async health ---- #
-    async def health(self) -> Dict[str, Any]:
+_init_state()
+
+# ---------- API Client ----------
+
+class API:
+    def __init__(self, base: str, key: str):
+        self.base = base.rstrip("/")
+        self.headers = {"X-API-Key": key, "Content-Type": "application/json"}
+
+    # ---- Low-level
+    def _request(self, method: str, path: str, *, json_body: Any | None = None, timeout: int = REQUEST_TIMEOUT) -> Tuple[Optional[Any], Optional[str]]:
+        url = f"{self.base}{path}"
         try:
-            async with aiohttp.ClientSession() as sess:
-                async with sess.get(
-                    f"{self.base}/health",
-                    headers=self.headers,
-                    timeout=aiohttp.ClientTimeout(total=7),
-                ) as r:
-                    if r.status == 200:
-                        return await r.json()
-                    return {"status": "error", "message": f"status {r.status}"}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+            r = requests.request(method, url, headers=self.headers, json=json_body, timeout=timeout)
+            if r.status_code >= 400:
+                return None, f"{method} {path} → HTTP {r.status_code}: {r.text[:300]}"
+            if path.endswith("/metrics"):
+                return r.text, None
+            if r.text.strip():
+                return r.json(), None
+            return None, None
+        except Exception as e:  # pragma: no cover
+            return None, f"{method} {path} → {e}"
 
-    # ---- basic GETs ---- #
-    def _get(self, path: str, err: str, ok_default=None):
+    # ---- Normalized helpers
+    def health(self) -> Dict[str, Any]:
+        data, err = self._request("GET", "/health", timeout=8)
+        if err:
+            return {"status": "error", "error": err}
+        return data or {"status": "unknown"}
+
+    def generators(self) -> List[str]:
+        data, err = self._request("GET", "/api/v1/generators")
+        if err or data is None:
+            return []
+        # normalize various shapes -> list[str]
         try:
-            r = requests.get(f"{self.base}{path}", headers=self.headers, timeout=12)
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            log.error("%s: %s", err, e)
-            return ok_default
+            if isinstance(data, list):
+                return [str(x) for x in data]
+            if "all" in data and isinstance(data["all"], list):
+                return [str(x) for x in data["all"]]
+            if "generators" in data and isinstance(data["generators"], list):
+                return [str(x) for x in data["generators"]]
+            linear = data.get("linear", []) if isinstance(data, dict) else []
+            nonlinear = data.get("nonlinear", []) if isinstance(data, dict) else []
+            if linear or nonlinear:
+                return [*map(str, linear), *map(str, nonlinear)]
+        except Exception:
+            pass
+        return []
 
-    def get_generators(self) -> Dict[str, Any]:
-        return self._get("/api/v1/generators", "get_generators failed", {"all": []})
-
-    def get_functions(self) -> Dict[str, Any]:
-        return self._get("/api/v1/functions", "get_functions failed", {"functions": []})
-
-    def get_models(self) -> Dict[str, Any]:
-        return self._get("/api/v1/models", "get_models failed", {"models": []})
-
-    def list_datasets(self) -> Dict[str, Any]:
-        return self._get("/api/v1/datasets", "list_datasets failed", {"datasets": []})
-
-    def get_statistics(self) -> Dict[str, Any]:
-        return self._get("/api/v1/stats", "get_statistics failed", {})
-
-    def get_metrics(self) -> str:
+    def functions(self) -> List[str]:
+        data, err = self._request("GET", "/api/v1/functions")
+        if err or data is None:
+            return []
         try:
-            r = requests.get(f"{self.base}/metrics", headers={"X-API-Key": self.headers["X-API-Key"]}, timeout=12)
-            r.raise_for_status()
-            return r.text
-        except Exception as e:
-            log.error("get_metrics failed: %s", e)
-            return ""
+            if isinstance(data, list):
+                return [str(x) for x in data]
+            if "functions" in data and isinstance(data["functions"], list):
+                return [str(x) for x in data["functions"]]
+            if "data" in data and isinstance(data["data"], dict) and isinstance(data["data"].get("functions"), list):
+                return [str(x) for x in data["data"]["functions"]]
+            if "items" in data and isinstance(data["items"], list):
+                return [str(x) for x in data["items"]]
+        except Exception:
+            pass
+        return []
 
-    def get_job_status(self, job_id: str) -> Dict[str, Any] | None:
-        try:
-            r = requests.get(f"{self.base}/api/v1/jobs/{job_id}", headers=self.headers, timeout=12)
-            if r.status_code == 404:
-                return None
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            log.error("get_job_status failed: %s", e)
-            return {"status": "error", "error": str(e)}
-
-    # ---- POSTs ---- #
-    def _post(self, path: str, payload: Dict[str, Any], err: str):
-        try:
-            r = requests.post(f"{self.base}{path}", json=payload, headers=self.headers, timeout=self.timeout)
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            log.error("%s: %s", err, e)
-            st.error(f"API Error: {e}")
+    def generate(self, *, generator: str, function: str, parameters: Dict[str, Any], count: int = 1, verify: bool = True) -> Dict[str, Any] | None:
+        body = {"generator": generator, "function": function, "parameters": parameters, "count": count, "verify": verify}
+        data, err = self._request("POST", "/api/v1/generate", json_body=body)
+        if err:
+            st.error(f"Generate failed: {err}")
             return None
+        return data
 
-    def generate(self, generator: str, function: str, parameters: Dict, count=1, verify=True):
-        return self._post(
-            "/api/v1/generate",
-            {"generator": generator, "function": function, "parameters": parameters, "count": count, "verify": verify},
-            "generate failed",
-        )
-
-    def batch_generate(
-        self,
-        generators: List[str],
-        functions: List[str],
-        samples_per_combination: int,
-        parameters: Optional[Dict] = None,
-        verify: bool = True,
-        dataset_name: Optional[str] = None,
-    ):
-        payload = {
+    def batch_generate(self, *, generators: List[str], functions: List[str], samples_per_combination: int, parameters: Optional[Dict[str, Any]] = None, verify: bool = True, dataset_name: Optional[str] = None) -> Dict[str, Any] | None:
+        body: Dict[str, Any] = {
             "generators": generators,
             "functions": functions,
             "samples_per_combination": samples_per_combination,
             "verify": verify,
         }
         if parameters:
-            payload["parameters"] = parameters
+            body["parameters"] = parameters
         if dataset_name:
-            payload["dataset_name"] = dataset_name
-        return self._post("/api/v1/batch_generate", payload, "batch_generate failed")
+            body["dataset_name"] = dataset_name
+        data, err = self._request("POST", "/api/v1/batch_generate", json_body=body)
+        if err:
+            st.error(f"Batch generate failed: {err}")
+            return None
+        return data
 
-    def verify(self, ode: str, solution: str, method="substitution"):
-        return self._post("/api/v1/verify", {"ode": ode, "solution": solution, "method": method}, "verify failed")
+    def verify(self, *, ode: str, solution: str, method: str = "substitution") -> Dict[str, Any] | None:
+        body = {"ode": ode, "solution": solution, "method": method}
+        data, err = self._request("POST", "/api/v1/verify", json_body=body)
+        if err:
+            st.error(f"Verify failed: {err}")
+            return None
+        return data
 
-    def create_dataset(self, odes: List[Dict], dataset_name: Optional[str] = None):
-        return self._post("/api/v1/datasets/create", {"odes": odes, "dataset_name": dataset_name}, "create_dataset failed")
+    def datasets(self) -> Dict[str, Any]:
+        data, err = self._request("GET", "/api/v1/datasets")
+        return data or {"datasets": [], "count": 0}
 
-    def train_ml(self, dataset: str, model_type: str, epochs: int, config: Dict[str, Any]):
-        payload = {
-            "dataset": dataset,
-            "model_type": model_type,
-            "epochs": epochs,
-            "batch_size": config.get("batch_size", 32),
-            "learning_rate": config.get("learning_rate", 1e-3),
-            "early_stopping": config.get("early_stopping", True),
-            "config": config,
-        }
-        return self._post("/api/v1/ml/train", payload, "train_ml failed")
+    def create_dataset(self, *, odes: List[Dict[str, Any]], dataset_name: Optional[str] = None) -> Dict[str, Any] | None:
+        body = {"odes": odes, "dataset_name": dataset_name}
+        data, err = self._request("POST", "/api/v1/datasets/create", json_body=body)
+        if err:
+            st.error(f"Create dataset failed: {err}")
+            return None
+        return data
 
-    def ml_generate(self, model_path: str, n_samples: int, temperature: float = 0.8, **kwargs):
-        payload = {"model_path": model_path, "n_samples": n_samples, "temperature": temperature, **kwargs}
-        return self._post("/api/v1/ml/generate", payload, "ml_generate failed")
+    def models(self) -> Dict[str, Any]:
+        data, _ = self._request("GET", "/api/v1/models")
+        return data or {"models": [], "count": 0}
+
+    def stats(self) -> Dict[str, Any]:
+        data, _ = self._request("GET", "/api/v1/stats")
+        return data or {}
+
+    def metrics(self) -> str:
+        data, _ = self._request("GET", "/metrics")
+        return data or ""
+
+    def job_status(self, job_id: str) -> Dict[str, Any] | None:
+        data, err = self._request("GET", f"/api/v1/jobs/{job_id}")
+        if err:
+            st.error(f"Job status failed: {err}")
+            return None
+        return data
 
 
-@st.cache_resource(show_spinner=False)
-def get_api() -> ODEAPI:
-    return ODEAPI(API_BASE_URL, API_KEY)
+api = API(API_BASE_URL, API_KEY)
+
+# ---------- Demo fallback ----------
+
+DEMO_GENERATORS = ["L1", "L2", "L3", "L4", "N1", "N2", "N3", "N4", "N5", "N6", "N7"]
+DEMO_FUNCTIONS = ["sine", "cosine", "tangent_safe", "exponential", "exp_scaled", "quadratic", "cubic", "sinh", "cosh", "tanh", "log_safe"]
+
+# ---------- Cache wrappers ----------
+
+@st.cache_data(ttl=60)
+def cached_generators() -> List[str]:
+    gens = api.generators()
+    return gens
+
+@st.cache_data(ttl=60)
+def cached_functions() -> List[str]:
+    funcs = api.functions()
+    return funcs
+
+@st.cache_data(ttl=30)
+def cached_stats() -> Dict[str, Any]:
+    return api.stats()
+
+# ---------- Helpers ----------
+
+def header():
+    st.markdown(
+        """
+        <div class="app-header">
+          <h2 style="margin:0">🔬 ODE Master Generator</h2>
+          <div style="opacity:.9">Generate, verify, and analyze ODEs — end to end.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+def status_chip(ok: bool) -> str:
+    return f"<span class='{ 'ok-dot' if ok else 'bad-dot' }'></span>{'API Online' if ok else 'API Offline'}"
 
 
-# --------------------------- #
-#       Utility Helpers       #
-# --------------------------- #
+def probe_and_load_resources():
+    """Hit /health, load generators & functions (with demo fallback)."""
+    if st.session_state.api_status is None:
+        with st.status("Checking API status…", expanded=True) as s:
+            h = api.health()
+            st.session_state.api_status = h
+            if h.get("status") in {"healthy", "ok", "operational"}:
+                s.update(label="API healthy", state="complete")
+            else:
+                s.update(label="API not healthy", state="error")
 
-def run_async(coro):
-    """Run an async function safely even if a loop exists."""
+    gens = cached_generators()
+    funcs = cached_functions()
+
+    if (not gens or not funcs) and USE_DEMO:
+        gens = gens or DEMO_GENERATORS
+        funcs = funcs or DEMO_FUNCTIONS
+
+    st.session_state.available_generators = gens
+    st.session_state.available_functions = funcs
+
+
+def render_equation_block(title: str, expr: str):
+    st.markdown(f"**{title}**")
+    st.markdown(f"<div class='latex-box'>{expr}</div>", unsafe_allow_html=True)
+
+
+def plot_solution(expression: str, x_range: Tuple[float, float] = (-5, 5), params: Optional[Dict[str, Any]] = None):
+    """Attempt to plot y(x)=<expression> using sympy if available."""
+    if not sp:
+        st.warning("Sympy not available on this runtime; skipping plot.")
+        return None
     try:
-        return asyncio.run(coro)
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
+        x = sp.Symbol("x")
+        expr = sp.sympify(expression)
+        if params:
+            for k, v in params.items():
+                try:
+                    expr = expr.subs(sp.Symbol(str(k)), v)
+                except Exception:
+                    pass
+        f = sp.lambdify(x, expr, "numpy")
+        xs = np.linspace(x_range[0], x_range[1], 1000)
+        ys = f(xs)
+        ys = np.real(np.nan_to_num(ys, nan=np.nan))
+        fig = go.Figure(go.Scatter(x=xs, y=ys, mode="lines", name="y(x)"))
+        fig.update_layout(template="plotly_white", height=420, title="Solution plot", xaxis_title="x", yaxis_title="y(x)")
+        return fig
+    except Exception as e:
+        st.info(f"Plotting skipped: {e}")
+        return None
 
-def wait_for_job(job_id: str, max_attempts=300, poll_interval=2) -> Optional[Dict[str, Any]]:
-    api = get_api()
-    bar = st.progress(0)
+
+def wait_for_job(job_id: str, *, max_secs: int = 600, poll: float = 2.0) -> Optional[Dict[str, Any]]:
+    start = time.time()
+    prog = st.progress(0)
     info = st.empty()
-    for i in range(max_attempts):
-        js = api.get_job_status(job_id)
+    while time.time() - start < max_secs:
+        js = api.job_status(job_id)
         if not js:
-            time.sleep(poll_interval)
+            time.sleep(poll)
             continue
         status = js.get("status", "unknown")
-        prog = int(js.get("progress", 0))
-        bar.progress(min(prog, 100))
-        meta = js.get("metadata") or {}
-        msg = meta.get("status") or status
-        info.text(f"Status: {msg}")
+        progress = int(js.get("progress", 0))
+        prog.progress(min(progress, 100))
+        meta = js.get("metadata", {})
+        if meta:
+            if "current_epoch" in meta:
+                info.text(f"{status} — epoch {meta['current_epoch']}/{meta.get('total_epochs','?')}")
+            elif "current" in meta and "total" in meta:
+                info.text(f"{status} — {meta['current']}/{meta['total']}")
+            else:
+                info.text(status)
         if status == "completed":
-            bar.progress(100)
+            prog.progress(100)
             return js
         if status == "failed":
             st.error(js.get("error", "Job failed"))
             return None
-        time.sleep(poll_interval)
-    st.error("Job timed out.")
+        time.sleep(poll)
+    st.error("Job timed out")
     return None
 
-def latex_box(title: str, text: str):
-    st.markdown(f"**{title}**")
-    st.markdown(f'<div class="latex">{text}</div>', unsafe_allow_html=True)
 
-def format_eq(eq: str) -> str:
-    if not eq:
-        return ""
-    try:
-        # quick prettify for common Derivative patterns
-        s = eq.replace("Derivative(y(x), (x, 3))", "y'''(x)")
-        s = s.replace("Derivative(y(x), x, 2)", "y''(x)")
-        s = s.replace("Derivative(y(x), (x, 2))", "y''(x)")
-        s = s.replace("Derivative(y(x), x)", "y'(x)")
-        if "Eq(" in s:
-            inner = s[3:-1] if s.endswith(")") else s[3:]
-            parts = inner.split(",", 1)
-            if len(parts) == 2:
-                s = f"{parts[0].strip()} = {parts[1].strip()}"
-        return s
-    except Exception:
-        return eq
+def download_jsonl(data: List[Dict[str, Any]], filename: str = "dataset.jsonl"):
+    payload = "\n".join(json.dumps(o) for o in data)
+    b64 = base64.b64encode(payload.encode()).decode()
+    st.markdown(f"<a download='{filename}' href='data:application/json;base64,{b64}'>📥 Download {filename}</a>", unsafe_allow_html=True)
 
-def plot_solution(solution_str: str, x_range: Tuple[float, float] = (-5, 5), params: Dict[str, float] | None = None):
-    try:
-        import sympy as sp
-        x = sp.Symbol("x")
-        expr = sp.sympify(solution_str)
-        if params:
-            for k, v in params.items():
-                expr = expr.subs(k, v)
-        f = sp.lambdify(x, expr, "numpy")
-        xs = np.linspace(x_range[0], x_range[1], 800)
-        ys = np.real(f(xs))
-        ys = np.where(np.abs(ys) > 1e10, np.nan, ys)
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", name="y(x)"))
-        fig.update_layout(template="plotly_white", height=380, title="Solution Plot", xaxis_title="x", yaxis_title="y(x)")
-        return fig
-    except Exception as e:
-        log.warning("plot_solution failed: %s", e)
-        return None
-
-def jsonl_download(data: List[Dict], filename: str, label: str):
-    buf = "\n".join(json.dumps(x) for x in data).encode()
-    b64 = base64.b64encode(buf).decode()
-    st.markdown(f'<a href="data:application/jsonl;base64,{b64}" download="{filename}">{label}</a>', unsafe_allow_html=True)
-
-def csv_download(df: pd.DataFrame, filename: str, label: str):
-    csv = df.to_csv(index=False).encode()
-    b64 = base64.b64encode(csv).decode()
-    st.markdown(f'<a href="data:text/csv;base64,{b64}" download="{filename}">{label}</a>', unsafe_allow_html=True)
-
-# --------------------------- #
-#        Session State        #
-# --------------------------- #
-
-for key, default in {
-    "generated_odes": [],
-    "batch_dataset": [],
-    "ml_generated_odes": [],
-    "current_dataset": None,
-    "available_datasets": [],
-    "available_models": [],
-    "available_generators": [],
-    "available_functions": [],
-    "api_status": None,
-}.items():
-    if key not in st.session_state:
-        st.session_state[key] = default
-
-# --------------------------- #
-#         Sidebar / UX        #
-# --------------------------- #
-
-st.markdown(
-    """
-<div class="card" style="background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%);color:white;margin-bottom:1rem;">
-  <div style="display:flex;align-items:center;justify-content:space-between;">
-    <div><h2 style="margin:.2rem 0;">🔬 ODE Master Generator</h2><div class="small" style="opacity:.9;">Integrated Generation • Verification • ML</div></div>
-  </div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
-
-with st.sidebar:
-    st.subheader("Connection")
-    api = get_api()
-    if st.session_state["api_status"] is None:
-        st.session_state["api_status"] = run_async(api.health())
-
-    healthy = (st.session_state["api_status"] or {}).get("status") == "healthy"
-    st.markdown(
-        f'<span class="badge {"badge-ok" if healthy else "badge-bad"}">'
-        f'API {"Online" if healthy else "Offline"}</span>',
-        unsafe_allow_html=True,
-    )
-    if not healthy and st.button("Retry"):
-        st.session_state["api_status"] = run_async(api.health())
-        st.experimental_rerun()
-
-    st.subheader("Navigation")
-    page = st.radio(
-        "Go to",
-        [
-            "🏠 Dashboard",
-            "⚡ Quick Generate",
-            "📦 Batch Generation",
-            "✅ Verification",
-            "📊 Dataset Management",
-            "🤖 ML Training",
-            "🧪 ML Generation",
-            "📈 Analysis",
-            "🛠️ System Tools",
-            "📚 Docs",
-        ],
-        label_visibility="collapsed",
-    )
-
-# preload lists once
-if not st.session_state["available_generators"]:
-    st.session_state["available_generators"] = api.get_generators().get("all", [])
-if not st.session_state["available_functions"]:
-    st.session_state["available_functions"] = api.get_functions().get("functions", [])
-if not st.session_state["available_datasets"]:
-    st.session_state["available_datasets"] = api.list_datasets().get("datasets", [])
-if not st.session_state["available_models"]:
-    st.session_state["available_models"] = api.get_models().get("models", [])
-
-# --------------------------- #
-#        Page: Dashboard      #
-# --------------------------- #
+# ---------- Pages ----------
 
 def page_dashboard():
-    st.subheader("System Dashboard")
-    stats = api.get_statistics() or {}
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown('<div class="metric-card"><div class="small">System</div>'
-                    f'<h3>{"🟢 ONLINE" if stats.get("status") == "operational" else "🔴 OFFLINE"}</h3></div>', unsafe_allow_html=True)
-    with col2:
-        st.markdown(f'<div class="metric-card"><div class="small">Generated (24h)</div>'
-                    f'<h3>{stats.get("total_generated_24h", 0):,}</h3></div>', unsafe_allow_html=True)
-    with col3:
-        st.markdown(f'<div class="metric-card"><div class="small">Verification Rate</div>'
-                    f'<h3>{stats.get("verification_success_rate", 0):.1%}</h3></div>', unsafe_allow_html=True)
-    with col4:
-        st.markdown(f'<div class="metric-card"><div class="small">Active Jobs</div>'
-                    f'<h3>{stats.get("active_jobs", 0)}</h3></div>', unsafe_allow_html=True)
+    st.title("Dashboard")
 
-    st.markdown('<div class="section">Recent Activity</div>', unsafe_allow_html=True)
-    if st.session_state["generated_odes"]:
-        for i, ode in enumerate(st.session_state["generated_odes"][-5:][::-1], 1):
-            with st.expander(f"Recent #{i} — {ode.get('generator','?')} / {ode.get('function','?')}", expanded=(i==1)):
-                latex_box("ODE", format_eq(ode.get("ode", "")))
-                if ode.get("solution"):
-                    latex_box("Solution", f"y(x) = {ode['solution']}")
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Complexity", ode.get("complexity", "N/A"))
-                c2.metric("Verified", "✅" if ode.get("verified") else "❌")
-                c3.metric("Time (ms)", f"{ode.get('properties',{}).get('generation_time_ms', 0):.0f}")
+    probe_and_load_resources()
+
+    online = (st.session_state.api_status or {}).get("status") in {"healthy", "ok", "operational"}
+    colA, colB, colC, colD = st.columns(4)
+    with colA:
+        st.markdown("<div class='metric-card'>" + status_chip(online) + "</div>", unsafe_allow_html=True)
+    stats = cached_stats()
+    with colB:
+        st.metric("Generated (24h)", f"{stats.get('total_generated_24h', 0):,}")
+    with colC:
+        st.metric("Verification Rate", f"{stats.get('verification_success_rate', 0):.1%}")
+    with colD:
+        st.metric("Active Jobs", stats.get("active_jobs", 0))
+
+    st.subheader("Recent ODEs")
+    if not st.session_state.generated_odes:
+        st.info("No recent ODEs yet. Try Quick Generate.")
     else:
-        st.info("No ODEs yet — try Quick Generate.")
+        for i, ode in enumerate(st.session_state.generated_odes[-5:][::-1], 1):
+            with st.expander(f"Recent {i}: {ode.get('generator','?')} × {ode.get('function','?')}"):
+                render_equation_block("ODE", ode.get("ode", ode.get("ode_symbolic", "")))
+                sol = ode.get("solution") or ode.get("solution_symbolic")
+                if sol:
+                    render_equation_block("Solution", f"y(x) = {sol}")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Complexity", ode.get("complexity", ode.get("complexity_score", "N/A")))
+                c2.metric("Verified", "✅" if ode.get("verified") else "❌")
+                gt = (
+                    ode.get("properties", {}).get("generation_time_ms")
+                    or (ode.get("generation_time", 0) * 1000)
+                )
+                c3.metric("Gen Time", f"{gt:.0f} ms")
 
-# --------------------------- #
-#     Page: Quick Generate    #
-# --------------------------- #
+    st.subheader("Resources")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Generators", len(st.session_state.available_generators))
+    c2.metric("Functions", len(st.session_state.available_functions))
+    c3.metric("Datasets", len(st.session_state.available_datasets))
+    c4.metric("Models", len(st.session_state.available_models))
 
-def param_controls(key_prefix: str, generator: str) -> Dict[str, float]:
-    p: Dict[str, float] = {}
-    c1, c2 = st.columns(2)
-    with c1:
-        p["alpha"] = st.slider("α (alpha)", -2.0, 2.0, 1.0, 0.1, key=f"{key_prefix}_alpha")
-        p["beta"] = st.slider("β (beta)", 0.1, 3.0, 1.0, 0.1, key=f"{key_prefix}_beta")
-    with c2:
-        p["M"] = st.slider("M", -1.0, 1.0, 0.0, 0.1, key=f"{key_prefix}_M")
+
+def params_controls(generator: str, key_prefix: str = "") -> Dict[str, Any]:
+    col1, col2 = st.columns(2)
+    params: Dict[str, Any] = {}
+    with col1:
+        params["alpha"] = st.slider("α (alpha)", -2.0, 2.0, 1.0, 0.1, key=f"{key_prefix}_alpha")
+        params["beta"] = st.slider("β (beta)", 0.1, 2.0, 1.0, 0.1, key=f"{key_prefix}_beta")
+    with col2:
+        params["M"] = st.slider("M", -1.0, 1.0, 0.0, 0.1, key=f"{key_prefix}_M")
         if generator.startswith("N"):
-            p["q"] = st.slider("q (power)", 2, 5, 2, key=f"{key_prefix}_q")
-            if generator in ["N2", "N3", "N6", "N7"]:
-                p["v"] = st.slider("v (power)", 2, 5, 3, key=f"{key_prefix}_v")
-        if generator in ["L4", "N6"]:
-            p["a"] = st.slider("a (pantograph)", 2.0, 5.0, 2.0, 0.5, key=f"{key_prefix}_a")
-    return p
+            params["q"] = st.slider("q (power)", 2, 5, 2, key=f"{key_prefix}_q")
+            if generator in {"N2", "N3", "N6", "N7"}:
+                params["v"] = st.slider("v (power)", 2, 5, 3, key=f"{key_prefix}_v")
+        if generator in {"L4", "N6"}:
+            params["a"] = st.slider("a (pantograph)", 2.0, 5.0, 2.0, 0.5, key=f"{key_prefix}_a")
+    return params
+
 
 def page_quick_generate():
-    st.subheader("⚡ Quick ODE Generation")
-    gens = st.session_state["available_generators"]
-    funcs = st.session_state["available_functions"]
+    st.title("⚡ Quick Generate")
+    probe_and_load_resources()
+
+    gens = st.session_state.available_generators
+    funcs = st.session_state.available_functions
     if not gens or not funcs:
-        st.error("No generators/functions available. Check API.")
+        st.error("No generators/functions available. Check API or enable USE_DEMO=1.")
         return
 
     c1, c2 = st.columns(2)
     with c1:
-        generator = st.selectbox("Generator", gens, format_func=lambda x: f"{x} ({'Linear' if x.startswith('L') else 'Nonlinear'})")
+        generator = st.selectbox("Generator", gens, index=0)
     with c2:
-        function = st.selectbox("Function", funcs)
+        function = st.selectbox("Function", funcs, index=min(0, len(funcs)-1))
 
-    st.markdown('<div class="section">Parameters</div>', unsafe_allow_html=True)
-    params = param_controls("quick", generator)
+    st.markdown("### Parameters")
+    params = params_controls(generator, key_prefix="quick")
 
     with st.expander("Advanced"):
-        verify = st.checkbox("Verify solution", True)
-        count = st.number_input("Number of ODEs", 1, 10, 1)
-        show_plot = st.checkbox("Plot solution", True)
-        x_range = st.slider("Plot x-range", -10.0, 10.0, (-5.0, 5.0))
+        colA, colB = st.columns(2)
+        with colA:
+            verify = st.checkbox("Verify solution", True)
+            count = st.number_input("Number of ODEs", 1, 10, 1)
+        with colB:
+            show_plot = st.checkbox("Plot solution (if available)", True)
+            x_range = st.slider("Plot range", -10.0, 10.0, (-5.0, 5.0))
 
-    if st.button("🚀 Generate"):
-        with st.spinner("Generating..."):
-            res = api.generate(generator, function, params, count=count, verify=verify)
-            if res and "job_id" in res:
-                done = wait_for_job(res["job_id"])
-                if done and done.get("results"):
-                    out = done["results"]
-                    st.success(f"Generated {len(out)} ODE(s).")
-                    for i, ode in enumerate(out, 1):
-                        st.session_state["generated_odes"].append(ode)
-                        st.markdown("---")
-                        st.markdown(f"**Result #{i}**")
-                        latex_box("ODE", format_eq(ode.get("ode", "")))
-                        if ode.get("solution"):
-                            latex_box("Solution", f"y(x) = {ode['solution']}")
-                        c1, c2, c3, c4 = st.columns(4)
-                        c1.metric("Complexity", ode.get("complexity", "N/A"))
-                        c2.metric("Verified", "✅" if ode.get("verified") else "❌")
-                        c3.metric("Confidence", f"{ode.get('properties',{}).get('verification_confidence',0):.2%}")
-                        c4.metric("Time (ms)", f"{ode.get('properties',{}).get('generation_time_ms',0):.0f}")
-                        if show_plot and ode.get("solution"):
-                            fig = plot_solution(ode["solution"], x_range, params)
-                            if fig:
-                                st.plotly_chart(fig, use_container_width=True)
-                            else:
-                                st.info("Plot unavailable for this solution.")
+    if st.button("🚀 Generate", type="primary"):
+        with st.status("Generating…", expanded=True) as s:
+            result = api.generate(generator=generator, function=function, parameters=params, count=count, verify=verify)
+            if not result or "job_id" not in result:
+                s.update(label="Failed to start job", state="error")
+                return
+            s.update(label=f"Job {result['job_id']} started")
+        js = wait_for_job(result["job_id"], max_secs=600)
+        if js and js.get("results"):
+            st.success(f"Generated {len(js['results'])} ODE(s)")
+            for i, ode in enumerate(js["results"], 1):
+                st.session_state.generated_odes.append(ode)
+                st.markdown("---")
+                st.subheader(f"ODE {i}")
+                render_equation_block("Generated ODE", ode.get("ode", ""))
+                if ode.get("solution"):
+                    render_equation_block("Solution", f"y(x) = {ode['solution']}")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Complexity", ode.get("complexity", "N/A"))
+                c2.metric("Verified", "✅" if ode.get("verified") else "❌")
+                conf = ode.get("properties", {}).get("verification_confidence", 0)
+                c3.metric("Confidence", f"{conf:.2%}")
+                tms = ode.get("properties", {}).get("generation_time_ms", 0)
+                c4.metric("Time", f"{tms:.0f} ms")
+                if show_plot and ode.get("solution"):
+                    fig = plot_solution(ode["solution"], x_range, params)
+                    if fig:
+                        st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.error("No results returned.")
 
-    if st.session_state["generated_odes"]:
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("📥 Download generated"):
-                jsonl_download(st.session_state["generated_odes"], "quick_generated_odes.jsonl", "Download JSONL")
-        with c2:
-            if st.button("🗑️ Clear"):
-                st.session_state["generated_odes"] = []
+    if st.session_state.generated_odes:
+        st.markdown("### Export")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📥 Download all"):
+                download_jsonl(st.session_state.generated_odes, "quick_generated_odes.jsonl")
+        with col2:
+            if st.button("🗑️ Clear cache"):
+                st.session_state.generated_odes = []
                 st.success("Cleared.")
 
-# --------------------------- #
-#     Page: Batch Generate    #
-# --------------------------- #
 
 def page_batch_generation():
-    st.subheader("📦 Batch ODE Generation")
-    gens = st.session_state["available_generators"]
-    funcs = st.session_state["available_functions"]
+    st.title("📦 Batch Generation")
+    probe_and_load_resources()
+    gens = st.session_state.available_generators
+    funcs = st.session_state.available_functions
     if not gens or not funcs:
-        st.error("No generators/functions available. Check API.")
+        st.error("No generators/functions available. Check API or enable USE_DEMO=1.")
         return
 
-    c1, c2 = st.columns(2)
-    with c1:
-        lin = [g for g in gens if g.startswith("L")]
-        nonlin = [g for g in gens if g.startswith("N")]
-        sel_lin = st.multiselect("Linear Generators", lin, default=lin[: min(2, len(lin))])
-        sel_nonlin = st.multiselect("Nonlinear Generators", nonlin, default=nonlin[: min(2, len(nonlin))])
-        selected_gens = sel_lin + sel_nonlin
-    with c2:
-        selected_funcs = st.multiselect("Functions", funcs, default=funcs[: min(6, len(funcs))])
+    tab1, tab2, tab3 = st.tabs(["Configuration", "Parameter Ranges", "Advanced"])
 
-    samples_per = st.slider("Samples per (generator,function)", 1, 20, 5)
-    st.info(f"Planned: **{len(selected_gens) * len(selected_funcs) * samples_per:,}** ODEs.")
+    with tab1:
+        col1, col2 = st.columns(2)
+        with col1:
+            linear = [g for g in gens if g.startswith("L")]
+            nonlinear = [g for g in gens if g.startswith("N")]
+            st.markdown("**Linear Generators**")
+            sel_lin = st.multiselect("", linear, default=linear[:2] if len(linear) >= 2 else linear, key="batch_lin")
+            st.markdown("**Nonlinear Generators**")
+            sel_non = st.multiselect(" ", nonlinear, default=nonlinear[:2] if len(nonlinear) >= 2 else nonlinear, key="batch_non")
+            selected_generators = sel_lin + sel_non
+        with col2:
+            st.markdown("**Functions**")
+            sel_funcs = st.multiselect("Choose functions", funcs, default=funcs[:5])
+        samples = st.slider("Samples per combination", 1, 20, 5)
+        total = len(selected_generators) * len(sel_funcs) * samples
+        st.info(f"This will generate **{total:,}** ODEs")
 
-    st.markdown('<div class="section">Parameter Grid</div>', unsafe_allow_html=True)
-    param_ranges: Dict[str, List] = {}
-    c1, c2 = st.columns(2)
-    with c1:
-        param_ranges["alpha"] = st.multiselect("α values", [-2.0,-1.0,-0.5,0.0,0.5,1.0,1.5,2.0], default=[0.0,1.0])
-        param_ranges["beta"]  = st.multiselect("β values", [0.5,1.0,1.5,2.0,2.5,3.0], default=[1.0,2.0])
-        param_ranges["M"]     = st.multiselect("M values",  [-1.0,-0.5,0.0,0.5,1.0], default=[0.0])
-    with c2:
-        if any(g.startswith("N") for g in selected_gens):
-            param_ranges["q"] = st.multiselect("q values", [2,3,4,5], default=[2,3])
-            param_ranges["v"] = st.multiselect("v values", [2,3,4,5], default=[2,3])
-        if any(g in ["L4","N6"] for g in selected_gens):
-            param_ranges["a"] = st.multiselect("a values", [2.0,2.5,3.0,3.5,4.0], default=[2.0])
+    param_ranges: Dict[str, Any] = {}
+    with tab2:
+        left, right = st.columns(2)
+        with left:
+            param_ranges["alpha"] = st.multiselect("α (alpha)", [-2.0,-1.5,-1.0,-0.5,0.0,0.5,1.0,1.5,2.0], default=[0.0,1.0])
+            param_ranges["beta"] = st.multiselect("β (beta)", [0.5,1.0,1.5,2.0,2.5,3.0], default=[1.0,2.0])
+            param_ranges["M"] = st.multiselect("M", [-1.0,-0.5,0.0,0.5,1.0], default=[0.0])
+        with right:
+            if any(g.startswith("N") for g in selected_generators):
+                param_ranges["q"] = st.multiselect("q (power)", [2,3,4,5], default=[2,3])
+                param_ranges["v"] = st.multiselect("v (power)", [2,3,4,5], default=[2,3])
+            if any(g in {"L4","N6"} for g in selected_generators):
+                param_ranges["a"] = st.multiselect("a (pantograph)", [2.0,2.5,3.0,3.5,4.0], default=[2.0])
 
-    st.markdown('<div class="section">Advanced</div>', unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    with c1:
-        verify = st.checkbox("Verify all", True)
-        save_dataset = st.checkbox("Save as dataset", True)
-        dataset_name = None
-        if save_dataset:
-            dataset_name = st.text_input("Dataset name", f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-    with c2:
-        export_fmt = st.selectbox("Export format (if returning ODEs)", ["JSONL", "CSV"])
+    with tab3:
+        col1, col2 = st.columns(2)
+        with col1:
+            verify = st.checkbox("Verify all", True)
+            save_ds = st.checkbox("Save as dataset", True)
+            ds_name = None
+            if save_ds:
+                ds_name = st.text_input("Dataset name", value=f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        with col2:
+            export_fmt = st.selectbox("Export format (when results returned inline)", ["JSONL", "CSV", "Parquet"], index=0)
 
-    if st.button("🚀 Start Batch"):
-        if not selected_gens or not selected_funcs:
-            st.error("Pick at least one generator and one function.")
+    if st.button("🚀 Start Batch", type="primary"):
+        if not selected_generators or not sel_funcs:
+            st.error("Please pick at least one generator and one function.")
             return
-        with st.spinner("Batch job started..."):
-            res = api.batch_generate(
-                generators=selected_gens,
-                functions=selected_funcs,
-                samples_per_combination=samples_per,
+        with st.status("Starting batch…", expanded=True) as s:
+            out = api.batch_generate(
+                generators=selected_generators,
+                functions=sel_funcs,
+                samples_per_combination=samples,
                 parameters=param_ranges if any(param_ranges.values()) else None,
                 verify=verify,
-                dataset_name=dataset_name if save_dataset else None,
+                dataset_name=ds_name if save_ds else None,
             )
-            if res and "job_id" in res:
-                done = wait_for_job(res["job_id"], max_attempts=600, poll_interval=3)
-                if done and done.get("status") == "completed":
-                    results = done.get("results", {})
-                    st.success(f"Done. Generated {results.get('total_generated', 0):,} ODEs.")
-                    if save_dataset and results.get("dataset_info"):
-                        info = results["dataset_info"]
-                        st.session_state["current_dataset"] = info["name"]
-                        st.session_state["available_datasets"].append(info)
-                        with st.container():
-                            st.markdown(f"**Dataset:** {info['name']} — {info.get('size', 0):,} ODEs")
-                    if "odes" in results:
-                        st.session_state["batch_dataset"] = results["odes"]
-                        st.markdown("### Sample")
-                        for ode in results["odes"][:5]:
-                            with st.expander(f"{ode.get('generator_name','?')} / {ode.get('function_name','?')}"):
-                                latex_box("ODE", format_eq(ode.get("ode_symbolic","")))
-                                if ode.get("solution_symbolic"):
-                                    latex_box("Solution", f"y(x) = {ode['solution_symbolic']}")
-                        if st.button("📥 Download dataset"):
-                            if export_fmt == "JSONL":
-                                jsonl_download(results["odes"], f"batch_odes_{len(results['odes'])}.jsonl", "Download JSONL")
-                            else:
-                                df = pd.DataFrame(results["odes"])
-                                csv_download(df, "batch_odes.csv", "Download CSV")
+            if not out or "job_id" not in out:
+                s.update(label="Batch failed to start", state="error")
+                return
+            s.update(label=f"Job {out['job_id']} queued")
+        js = wait_for_job(out["job_id"], max_secs=3600, poll=3)
+        if not js or js.get("status") != "completed":
+            st.error("Batch did not complete.")
+            return
+        results = js.get("results", {})
+        st.success(f"Done! Generated {results.get('total_generated', 0):,} ODEs")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total", f"{results.get('total_generated', 0):,}")
+        c2.metric("Verified", f"{results.get('verified_count', 0):,}")
+        try:
+            rate = (results.get('summary',{}).get('verified',0) / max(results.get('total_generated',1),1))*100
+        except Exception:
+            rate = 0.0
+        c3.metric("Success Rate", f"{rate:.1f}%")
+        c4.metric("Avg Complexity", f"{results.get('summary',{}).get('avg_complexity',0):.1f}")
 
-# --------------------------- #
-#       Page: Verification    #
-# --------------------------- #
+        if save_ds and results.get("dataset_info"):
+            ds = results["dataset_info"]
+            st.session_state.current_dataset = ds.get("name")
+            # Refresh dataset list
+            dlist = api.datasets()
+            st.session_state.available_datasets = dlist.get("datasets", [])
+            st.info(f"Saved dataset: {ds.get('name')} ({ds.get('size',0):,} ODEs)")
+        elif results.get("odes"):
+            st.session_state.batch_dataset = results["odes"]
+            st.markdown("### Sample")
+            for i, ode in enumerate(results["odes"][:5], 1):
+                with st.expander(f"Sample {i}: {ode.get('generator_name','?')} × {ode.get('function_name','?')}"):
+                    render_equation_block("ODE", ode.get("ode_symbolic", ""))
+                    sol = ode.get("solution_symbolic")
+                    if sol:
+                        render_equation_block("Solution", f"y(x) = {sol}")
+            st.markdown("### Export inline results")
+            if st.button("📥 Download"):
+                if export_fmt == "JSONL":
+                    download_jsonl(results["odes"], f"batch_odes_{len(results['odes'])}.jsonl")
+                elif export_fmt == "CSV":
+                    df = pd.DataFrame(results["odes"]).to_csv(index=False)
+                    b64 = base64.b64encode(df.encode()).decode()
+                    st.markdown(f"<a download='batch_odes.csv' href='data:text/csv;base64,{b64}'>📥 CSV</a>", unsafe_allow_html=True)
+                else:
+                    st.info("Parquet export not implemented in this single-file app.")
 
-def page_verification():
-    st.subheader("✅ ODE Verification")
-    t1, t2 = st.tabs(["Single", "Batch"])
-    with t1:
-        c1, c2 = st.columns(2)
-        with c1:
-            ode_s = st.text_area("ODE (SymPy Eq(...))", "Eq(Derivative(y(x), x, 2) + y(x), pi*sin(x))", height=120)
-        with c2:
-            sol_s = st.text_area("Solution expression", "pi*sin(x)", height=120)
-        method = st.selectbox("Method", ["substitution","numerical","checkodesol"])
-        if st.button("🔍 Verify"):
-            with st.spinner("Verifying..."):
-                res = api.verify(ode_s, sol_s, method)
-                if res:
-                    ok = res.get("verified", False)
-                    st.success(f"Verified ✅ (confidence {res.get('confidence',0):.2%})") if ok else st.error("Not verified ❌")
-                    with st.expander("Details"):
-                        st.json(res)
-    with t2:
-        up = st.file_uploader("Upload JSONL (ode_symbolic, solution_symbolic)", type=["jsonl","json"])
-        if up is not None:
-            lines = [json.loads(l) for l in up.read().decode().splitlines() if l.strip()]
-            st.info(f"Loaded {len(lines)} ODEs.")
-            method = st.selectbox("Batch method", ["substitution","numerical","all"])
-            if st.button("Run batch verification"):
-                out = []
-                good = 0
-                bar = st.progress(0)
-                for i, row in enumerate(lines, 1):
-                    ode = row.get("ode_symbolic")
-                    sol = row.get("solution_symbolic")
-                    res = api.verify(ode, sol, method) if (ode and sol) else None
+
+def page_verify():
+    st.title("✅ Verification")
+    col1, col2 = st.columns(2)
+    with col1:
+        ode_txt = st.text_area("ODE (SymPy Eq(...))", value="Eq(Derivative(y(x), x, 2) + y(x), pi*sin(x))", height=120)
+    with col2:
+        sol_txt = st.text_area("Proposed Solution", value="pi*sin(x)", height=120)
+    method = st.selectbox("Method", ["substitution", "numerical", "checkodesol"]) 
+    if st.button("🔍 Verify", type="primary"):
+        with st.status("Verifying…", expanded=False):
+            res = api.verify(ode=ode_txt, solution=sol_txt, method=method)
+        if res:
+            if res.get("verified"):
+                st.success(f"Verified ✅ — Confidence {res.get('confidence',0):.2%}")
+            else:
+                st.error("Not verified ❌")
+            st.json(res)
+
+    st.divider()
+    st.subheader("Batch Verification (JSONL)")
+    up = st.file_uploader("Upload JSONL", type=["jsonl","json"])
+    if up is not None:
+        items: List[Dict[str, Any]] = []
+        for raw in up:
+            line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                items.append(json.loads(line))
+            except Exception:
+                pass
+        st.info(f"Loaded {len(items)} records")
+        if st.button("Run batch verify"):
+            verified = 0
+            out: List[Dict[str, Any]] = []
+            pb = st.progress(0)
+            for i, row in enumerate(items, 1):
+                ode = row.get("ode") or row.get("ode_symbolic")
+                sol = row.get("solution") or row.get("solution_symbolic")
+                if ode and sol:
+                    res = api.verify(ode=ode, solution=sol, method=method)
                     row["verification_result"] = res
-                    out.append(row)
                     if res and res.get("verified"):
-                        good += 1
-                    bar.progress(i/len(lines))
-                st.success(f"{good}/{len(lines)} verified.")
-                if st.button("📥 Download verified file"):
-                    jsonl_download(out, "verified_odes.jsonl", "Download JSONL")
+                        verified += 1
+                out.append(row)
+                pb.progress(int(i/len(items)*100))
+            st.success(f"{verified}/{len(items)} verified")
+            if st.button("📥 Download verified set"):
+                download_jsonl(out, "verified_odes.jsonl")
 
-# --------------------------- #
-#     Page: Datasets          #
-# --------------------------- #
 
 def page_datasets():
-    st.subheader("📊 Dataset Management")
+    st.title("📊 Datasets")
     if st.button("🔄 Refresh"):
-        st.session_state["available_datasets"] = api.list_datasets().get("datasets", [])
+        d = api.datasets()
+        st.session_state.available_datasets = d.get("datasets", [])
         st.success("Refreshed.")
-    if not st.session_state["available_datasets"]:
-        st.info("No datasets yet. Use Batch Generation.")
+    if not st.session_state.available_datasets:
+        st.info("No datasets yet. Use Batch Generation first.")
     else:
-        for ds in st.session_state["available_datasets"]:
-            with st.expander(f"📁 {ds['name']} — {ds.get('size',0):,} ODEs"):
-                st.write(f"Path: {ds.get('path','?')}")
+        for ds in st.session_state.available_datasets:
+            with st.expander(f"📁 {ds.get('name')} ({ds.get('size',0):,} ODEs)"):
                 st.write(f"Created: {ds.get('created_at','?')}")
+                st.write(f"Path: {ds.get('path','?')}")
                 c1, c2 = st.columns(2)
                 with c1:
-                    if st.button("Select", key=f"sel_{ds['name']}"):
-                        st.session_state["current_dataset"] = ds["name"]
-                        st.success(f"Selected {ds['name']}")
+                    if st.button("Select", key=f"sel_{ds.get('name')}"):
+                        st.session_state.current_dataset = ds.get("name")
+                        st.success(f"Selected {ds.get('name')}")
                 with c2:
-                    st.caption("Download link would be provided by API (if available).")
+                    st.caption("Download handled by your API or storage; add a link here if available.")
 
-    st.markdown("### Create Dataset from Last Batch")
-    if st.session_state["batch_dataset"]:
-        st.info(f"{len(st.session_state['batch_dataset'])} ODEs buffered from last run.")
-        new_name = st.text_input("Dataset name", f"custom_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    st.subheader("Create from cached batch results")
+    if st.session_state.batch_dataset:
+        st.info(f"You have {len(st.session_state.batch_dataset)} ODEs cached")
+        new_name = st.text_input("Dataset name", value=f"custom_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
         if st.button("💾 Save as dataset"):
-            with st.spinner("Saving..."):
-                res = api.create_dataset(st.session_state["batch_dataset"], new_name)
-                if res:
-                    st.success(f"Saved as '{new_name}'")
-                    st.session_state["current_dataset"] = new_name
-                    st.session_state["available_datasets"] = api.list_datasets().get("datasets", [])
-                    st.session_state["batch_dataset"] = []
+            res = api.create_dataset(odes=st.session_state.batch_dataset, dataset_name=new_name)
+            if res:
+                st.success("Saved.")
+                d = api.datasets()
+                st.session_state.available_datasets = d.get("datasets", [])
+                st.session_state.batch_dataset = []
     else:
-        st.info("Run a Batch Generation to buffer ODEs for saving.")
+        st.caption("Run a batch first to create from cache.")
 
-# --------------------------- #
-#       Page: ML Train        #
-# --------------------------- #
+    if st.session_state.current_dataset:
+        st.subheader(f"Current: {st.session_state.current_dataset}")
+        c1, c2, c3 = st.columns(3)
+        c1.button("📈 Analyze (see Analysis tab)")
+        c2.button("🔧 Preprocess (placeholder)")
+        with c3:
+            if st.button("🗑️ Delete (placeholder)"):
+                st.warning("Implement delete endpoint in API then wire here.")
+
 
 def page_ml_training():
-    st.subheader("🤖 ML Training")
-    datasets = st.session_state["available_datasets"]
+    st.title("🤖 ML Training")
+    d = api.datasets()
+    datasets = [ds.get("name") for ds in d.get("datasets", [])]
     if not datasets:
-        st.warning("No datasets available.")
+        st.warning("No datasets. Create one first.")
         return
-    names = [d["name"] for d in datasets]
-    ds_name = st.selectbox("Dataset", names, index=0)
-    model_type = st.selectbox("Model Type", ["pattern_net", "transformer", "vae"])
-    c1, c2 = st.columns(2)
-    with c1:
+    col1, col2 = st.columns(2)
+    with col1:
+        ds_name = st.selectbox("Dataset", datasets, index=0)
         epochs = st.slider("Epochs", 10, 200, 50, 10)
+        model_type = st.selectbox("Model Type", ["pattern_net", "transformer", "vae"], index=0, format_func=lambda x: {
+            "pattern_net": "PatternNet (fast)",
+            "transformer": "Transformer (powerful)",
+            "vae": "VAE (generative)",
+        }[x])
+    with col2:
         batch_size = st.selectbox("Batch size", [16,32,64,128], index=1)
-    with c2:
-        lr = st.select_slider("Learning rate", options=[1e-5,1e-4,1e-3,1e-2], value=1e-3, format_func=lambda x: f"{x:.0e}")
+        lr = st.select_slider("Learning rate", [1e-5,1e-4,1e-3,1e-2], value=1e-3, format_func=lambda x: f"{x:.0e}")
         early = st.checkbox("Early stopping", True)
 
-    # model-specific
     cfg: Dict[str, Any] = {"batch_size": batch_size, "learning_rate": lr, "early_stopping": early}
     if model_type == "pattern_net":
-        cfg["hidden_dims"] = st.multiselect("Hidden dims", [64,128,256,512], default=[256,128,64])
-        cfg["dropout_rate"] = st.slider("Dropout", 0.0, 0.5, 0.2, 0.05)
+        c1, c2 = st.columns(2)
+        with c1:
+            cfg["hidden_dims"] = st.multiselect("Hidden dims", [64,128,256,512], default=[256,128,64])
+        with c2:
+            cfg["dropout_rate"] = st.slider("Dropout", 0.0, 0.5, 0.2, 0.05)
     elif model_type == "transformer":
         c1, c2 = st.columns(2)
         with c1:
@@ -700,7 +730,7 @@ def page_ml_training():
         with c2:
             cfg["n_layers"] = st.slider("Layers", 2, 12, 6)
             cfg["dim_feedforward"] = st.selectbox("FF dim", [1024,2048,4096], index=1)
-    else:  # vae
+    else:  # VAE
         c1, c2 = st.columns(2)
         with c1:
             cfg["latent_dim"] = st.slider("Latent dim", 16, 256, 64, 16)
@@ -708,226 +738,258 @@ def page_ml_training():
         with c2:
             cfg["beta"] = st.slider("KL β", 0.1, 10.0, 1.0, 0.1)
 
-    if st.button("🚀 Start Training"):
-        with st.spinner("Submitting training job..."):
-            res = api.train_ml(ds_name, model_type, epochs, cfg)
-            if res and "job_id" in res:
-                done = wait_for_job(res["job_id"], max_attempts=epochs * 10, poll_interval=2)
-                if done and done.get("status") == "completed":
-                    results = done.get("results", {})
-                    st.success("Training completed.")
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Loss", f"{results.get('final_metrics',{}).get('loss',0):.4f}")
-                    c2.metric("Acc", f"{results.get('final_metrics',{}).get('accuracy',0):.2%}")
-                    c3.metric("Val Loss", f"{results.get('final_metrics',{}).get('validation_loss',0):.4f}")
-                    c4.metric("Time (s)", f"{results.get('training_time',0):.1f}")
-                    st.session_state["available_models"] = api.get_models().get("models", [])
+    if st.button("🚀 Start Training", type="primary"):
+        body = {
+            "dataset": ds_name,
+            "model_type": model_type,
+            "epochs": epochs,
+            "batch_size": cfg.get("batch_size", 32),
+            "learning_rate": cfg.get("learning_rate", 0.001),
+            "early_stopping": cfg.get("early_stopping", True),
+            "config": cfg,
+        }
+        data, err = api._request("POST", "/api/v1/ml/train", json_body=body)
+        if err or not data or "job_id" not in data:
+            st.error(f"Could not start training: {err or 'no response'}")
+            return
+        js = wait_for_job(data["job_id"], max_secs=epochs*15, poll=2)
+        if js and js.get("status") == "completed":
+            res = js.get("results", {})
+            st.success("Training complete")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Loss", f"{res.get('final_metrics',{}).get('loss',0):.4f}")
+            c2.metric("Acc", f"{res.get('final_metrics',{}).get('accuracy',0):.2%}")
+            c3.metric("Val loss", f"{res.get('final_metrics',{}).get('validation_loss',0):.4f}")
+            c4.metric("Time", f"{res.get('training_time',0):.1f}s")
+            # refresh model list
+            st.session_state.available_models = api.models().get("models", [])
+        else:
+            st.error("Training failed or timed out.")
 
-# --------------------------- #
-#     Page: ML Generation     #
-# --------------------------- #
 
-def page_ml_generation():
-    st.subheader("🧪 ML-Based Generation")
-    models = st.session_state["available_models"]
+def page_ml_generate():
+    st.title("🧪 ML Generation")
+    models = api.models().get("models", [])
     if not models:
-        st.warning("No trained models yet.")
+        st.warning("No models available. Train one first.")
         return
-    options = [(m["path"], f"{m['name']} ({m.get('metadata',{}).get('model_type','?')}) — {m.get('created','')[:10]}", m) for m in models]
-    idx = st.selectbox("Model", range(len(options)), format_func=lambda i: options[i][1] if options else "—")
-    model_path, _, meta = options[idx]
-    st.caption(f"Trained on: {meta.get('metadata',{}).get('dataset','?')}")
+    idx = st.selectbox("Model", list(range(len(models))), format_func=lambda i: f"{models[i].get('name','model')} — {models[i].get('metadata',{}).get('model_type','?')}")
+    model = models[idx]
+    st.markdown(
+        f"""
+        <div class='info-box'>
+          <b>Type:</b> {model.get('metadata',{}).get('model_type','?')} &nbsp;·&nbsp;
+          <b>Dataset:</b> {model.get('metadata',{}).get('dataset','?')}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    c1, c2 = st.columns(2)
-    with c1:
-        n_samples = st.slider("# ODEs", 5, 100, 20, 5)
-        temperature = st.slider("Temperature", 0.1, 2.0, 0.8, 0.1)
-    with c2:
-        gen = st.selectbox("Target generator", ["Auto"] + st.session_state["available_generators"])
-        fun = st.selectbox("Target function", ["Auto"] + st.session_state["available_functions"][:20])
-    with st.expander("Advanced filters"):
+    col1, col2 = st.columns(2)
+    with col1:
+        n_samples = st.slider("# of ODEs", 5, 100, 20, 5)
+        temp = st.slider("Temperature", 0.1, 2.0, 0.8, 0.1)
+    with col2:
+        target_gen = st.selectbox("Target generator (optional)", ["Auto"] + st.session_state.available_generators)
+        target_fun = st.selectbox("Target function (optional)", ["Auto"] + st.session_state.available_functions)
+
+    with st.expander("Advanced"):
         c1, c2 = st.columns(2)
         with c1:
-            cmin = st.number_input("Min complexity", 0, 10000, 50, 10)
+            cmin = st.number_input("Min complexity", 10, 1000, 50, 10)
         with c2:
-            cmax = st.number_input("Max complexity", cmin, 20000, 200, 10)
-        verify = st.checkbox("Verify outputs", True)
-        dedup = st.checkbox("Filter duplicates", True)
+            cmax = st.number_input("Max complexity", cmin, 2000, 200, 10)
 
-    if st.button("🎨 Generate"):
-        kwargs = {"complexity_range": [cmin, cmax]}
-        if gen != "Auto":
-            kwargs["generator"] = gen
-        if fun != "Auto":
-            kwargs["function"] = fun
-        res = api.ml_generate(model_path, n_samples, temperature, **kwargs)
-        if res and "job_id" in res:
-            done = wait_for_job(res["job_id"], max_attempts=180)
-            if done and done.get("status") == "completed":
-                results = done.get("results", {})
-                odes = results.get("odes", [])
-                st.success(f"Generated {len(odes)} ODEs.")
-                st.session_state["ml_generated_odes"].extend(odes)
-                show = st.slider("Show first N", 1, len(odes), min(10, len(odes)))
-                for ode in odes[:show]:
-                    with st.expander(f"{ode.get('generator','ML')} / {ode.get('function','?')} — {'✅' if ode.get('verified') else '❓'}"):
-                        latex_box("ODE", format_eq(ode.get("ode","")))
-                        if ode.get("solution"):
-                            latex_box("Solution", f"y(x) = {ode['solution']}")
-                if st.button("📥 Download generated"):
-                    jsonl_download(odes, f"ml_generated_{len(odes)}.jsonl", "Download JSONL")
-                if st.button("💾 Save as dataset"):
-                    name = f"ml_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                    with st.spinner("Saving..."):
-                        ok = api.create_dataset(odes, name)
-                        if ok:
-                            st.success(f"Saved dataset '{name}'")
-                            st.session_state["available_datasets"] = api.list_datasets().get("datasets", [])
+    if st.button("🎨 Generate", type="primary"):
+        payload: Dict[str, Any] = {"model_path": model.get("path"), "n_samples": n_samples, "temperature": temp, "complexity_range": [cmin, cmax]}
+        if target_gen != "Auto":
+            payload["generator"] = target_gen
+        if target_fun != "Auto":
+            payload["function"] = target_fun
+        data, err = api._request("POST", "/api/v1/ml/generate", json_body=payload)
+        if err or not data or "job_id" not in data:
+            st.error(f"Failed to start ML generation: {err or 'no response'}")
+            return
+        js = wait_for_job(data["job_id"], max_secs=900, poll=2)
+        if not js or js.get("status") != "completed":
+            st.error("ML generation did not complete.")
+            return
+        results = js.get("results", {})
+        odes = results.get("odes", [])
+        st.success(f"Generated {len(odes)} ODEs")
+        st.session_state.ml_generated_odes.extend(odes)
+        show = st.slider("Preview count", 1, max(1,len(odes)), min(10, len(odes)))
+        for i, ode in enumerate(odes[:show], 1):
+            with st.expander(f"#{i} — {ode.get('generator','ML')} — {'✅' if ode.get('verified') else '❔'}"):
+                render_equation_block("ODE", ode.get("ode",""))
+                if ode.get("solution"):
+                    render_equation_block("Solution", f"y(x) = {ode['solution']}")
+        if odes and st.button("📥 Download"):
+            download_jsonl(odes, f"ml_generated_{len(odes)}.jsonl")
 
-# --------------------------- #
-#        Page: Analysis       #
-# --------------------------- #
 
 def page_analysis():
-    st.subheader("📈 Analysis & Visualization")
-    src = st.radio("Data source", ["Generated", "Batch buffer", "ML generated"], horizontal=True)
-    if src == "Generated":
-        data = st.session_state["generated_odes"]
-    elif src == "Batch buffer":
-        data = st.session_state["batch_dataset"]
+    st.title("📈 Analysis")
+    source = st.radio("Source", ["Generated", "Batch cache", "ML generated", "Dataset (placeholder)"] , horizontal=True)
+    if source == "Generated":
+        data = st.session_state.generated_odes
+    elif source == "Batch cache":
+        data = st.session_state.batch_dataset
+    elif source == "ML generated":
+        data = st.session_state.ml_generated_odes
     else:
-        data = st.session_state["ml_generated_odes"]
-
+        st.info("To analyze a stored dataset, add an endpoint to fetch rows by name and load it here.")
+        data = []
     if not data:
-        st.info("No data for analysis.")
+        st.warning("No data to analyze yet.")
         return
-
     df = pd.DataFrame(data)
-    st.info(f"Rows: {len(df)}")
+    st.write(df.head(3))
 
-    t1, t2, t3 = st.tabs(["Overview", "Distributions", "Verification"])
-    with t1:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total", len(df))
-        if "verified" in df:
-            c2.metric("Verified", int(df["verified"].sum()))
-        if "generator" in df:
-            c3.metric("Generators", df["generator"].nunique())
-        if "function" in df:
-            c4.metric("Functions", df["function"].nunique())
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total", len(df))
+    if "verified" in df:
+        good = int(df["verified"].sum())
+        c2.metric("Verified", f"{good} ({good/len(df)*100:.1f}%)")
+    if "generator" in df:
+        c3.metric("Generators", df["generator"].nunique())
+    if "function" in df:
+        c4.metric("Functions", df["function"].nunique())
 
-        if "generator" in df:
-            cnt = df["generator"].value_counts()
-            st.plotly_chart(px.bar(x=cnt.index, y=cnt.values, labels={"x":"Generator","y":"Count"}, title="By Generator"), use_container_width=True)
-        if "function" in df:
-            cnt = df["function"].value_counts().head(15)
-            st.plotly_chart(px.pie(values=cnt.values, names=cnt.index, title="Top Functions"), use_container_width=True)
+    if "generator" in df:
+        st.subheader("By generator")
+        counts = df["generator"].value_counts()
+        fig = px.bar(x=counts.index, y=counts.values, labels={"x":"Generator","y":"Count"}, title="Distribution by generator")
+        st.plotly_chart(fig, use_container_width=True)
 
-    with t2:
-        if "complexity" in df:
-            st.plotly_chart(px.histogram(df, x="complexity", nbins=50, title="Complexity distribution"), use_container_width=True)
-            if "generator" in df:
-                st.plotly_chart(px.box(df, x="generator", y="complexity", title="Complexity by Generator", color="generator"), use_container_width=True)
+    if "function" in df:
+        st.subheader("Top functions")
+        fcounts = df["function"].value_counts().head(15)
+        fig = px.pie(values=fcounts.values, names=fcounts.index, title="Top 15 functions")
+        st.plotly_chart(fig, use_container_width=True)
 
-    with t3:
-        if "verified" in df:
-            ver_rate = df["verified"].mean() * 100 if len(df) else 0
-            st.metric("Verification rate", f"{ver_rate:.1f}%")
-            if "complexity" in df:
-                bins = pd.qcut(df["complexity"], q=min(10, df["complexity"].nunique()), duplicates="drop")
-                ver_by_bin = df.groupby(bins)["verified"].mean() * 100
-                st.plotly_chart(px.line(x=ver_by_bin.index.astype(str), y=ver_by_bin.values, markers=True,
-                                        labels={"x":"Complexity bin","y":"Verification %"}, title="Verification vs Complexity"),
-                                use_container_width=True)
+    if "complexity" in df:
+        st.subheader("Complexity distribution")
+        fig = px.histogram(df, x="complexity", nbins=40)
+        st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("### Export")
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("📥 Download JSONL"):
-            jsonl_download(data, "analysis_export.jsonl", "Download JSONL")
-    with c2:
-        if st.button("📥 Download CSV"):
-            csv_download(df, "analysis_export.csv", "Download CSV")
+    if set(["generator","verified"]).issubset(df.columns):
+        st.subheader("Verification rate by generator")
+        ver = df.groupby("generator")["verified"].mean().mul(100).sort_values(ascending=False)
+        fig = px.bar(x=ver.index, y=ver.values, labels={"x":"Generator","y":"Verification %"})
+        st.plotly_chart(fig, use_container_width=True)
 
-# --------------------------- #
-#       Page: System Tools    #
-# --------------------------- #
+    st.subheader("Export analysis summary")
+    summary = {
+        "total": int(len(df)),
+        "verified": int(df["verified"].sum()) if "verified" in df else 0,
+        "verification_rate": float(df["verified"].mean()) if "verified" in df else 0.0,
+        "unique_generators": int(df["generator"].nunique()) if "generator" in df else 0,
+        "unique_functions": int(df["function"].nunique()) if "function" in df else 0,
+        "avg_complexity": float(df["complexity"].mean()) if "complexity" in df else 0.0,
+    }
+    st.json(summary)
+    if st.button("📥 Download report"):
+        b64 = base64.b64encode(json.dumps({"generated_at": datetime.now().isoformat(), "summary": summary}).encode()).decode()
+        st.markdown(f"<a download='analysis_report.json' href='data:application/json;base64,{b64}'>Download JSON</a>", unsafe_allow_html=True)
+
 
 def page_tools():
-    st.subheader("🛠️ System Tools")
-    t1, t2, t3 = st.tabs(["Status", "Metrics", "Utilities"])
-    with t1:
-        status = st.session_state["api_status"] or {}
-        col1, col2 = st.columns(2)
-        with col1:
-            st.json(status)
-        with col2:
-            stats = api.get_statistics() or {}
-            st.json(stats)
-        if st.button("🔄 Refresh health"):
-            st.session_state["api_status"] = run_async(api.health())
-            st.success("Refreshed.")
+    st.title("🛠️ Tools & Status")
+    probe_and_load_resources()
+    h = st.session_state.api_status or {}
+    st.markdown(
+        f"<div class='info-box'><b>Status:</b> {h.get('status','?')} · <b>ML:</b> {'✅' if h.get('ml_enabled') else '❌'} · <b>Timestamp:</b> {h.get('timestamp','?')}</div>",
+        unsafe_allow_html=True,
+    )
 
-    with t2:
-        if st.button("Fetch Prometheus metrics"):
-            text = api.get_metrics()
-            st.text_area("metrics", text[:2000] + ("..." if len(text) > 2000 else ""), height=300)
+    st.subheader("Raw stats")
+    st.json(cached_stats())
 
-    with t3:
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Clear in-memory ODEs"):
-                st.session_state["generated_odes"] = []
-                st.session_state["batch_dataset"] = []
-                st.session_state["ml_generated_odes"] = []
-                st.success("Cleared.")
-        with c2:
-            if st.button("Reset session"):
-                for k in list(st.session_state.keys()):
+    st.subheader("Probe endpoints")
+    col1, col2 = st.columns(2)
+    with col1:
+        d1, e1 = api._request("GET", "/api/v1/generators")
+        st.code((json.dumps(d1, indent=2) if isinstance(d1, dict) else str(d1))[:800])
+    with col2:
+        d2, e2 = api._request("GET", "/api/v1/functions")
+        st.code((json.dumps(d2, indent=2) if isinstance(d2, dict) else str(d2))[:800])
+
+    st.subheader("Prometheus metrics (first 2k chars)")
+    met = api.metrics()
+    if met:
+        st.text(met[:2000] + ("…" if len(met) > 2000 else ""))
+    else:
+        st.caption("No metrics or endpoint unavailable.")
+
+    st.subheader("Cache / Session")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("🧹 Clear cached ODEs"):
+            st.session_state.generated_odes = []
+            st.session_state.batch_dataset = []
+            st.session_state.ml_generated_odes = []
+            st.success("Cleared.")
+    with c2:
+        if st.button("🔄 Reset session (soft)"):
+            for k in list(st.session_state.keys()):
+                if k not in {"api_status","available_generators","available_functions"}:
                     del st.session_state[k]
-                st.experimental_rerun()
+            st.success("Session reset.")
 
-# --------------------------- #
-#          Page: Docs         #
-# --------------------------- #
 
 def page_docs():
-    st.subheader("📚 Documentation (Quick)")
+    st.title("📚 Documentation")
     st.markdown(
         """
-**Workflow**
-1. Generate (Quick or Batch)  
-2. Verify (optional)  
-3. Create/Select Dataset  
-4. Train ML  
-5. Generate via ML  
-6. Analyze & Export
+        **Workflow**
+        1) Quick/Batch Generate → 2) Verify → 3) Create Dataset → 4) Train ML → 5) ML Generate → 6) Analysis
 
-**API headers**: `X-API-Key` required.
+        **API requirements**
+        - All endpoints require `X-API-Key` header
+        - Expected endpoints: `/api/v1/generate`, `/api/v1/batch_generate`, `/api/v1/verify`, `/api/v1/datasets`, `/api/v1/datasets/create`, `/api/v1/models`, `/api/v1/ml/train`, `/api/v1/ml/generate`, `/api/v1/jobs/{id}`, `/api/v1/stats`, `/metrics`, `/health`.
 
-**Generators**: L* (linear), N* (nonlinear).  
-**Common params**: α, β, M; nonlinear: q, v; pantograph: a.
+        **Deployment (Railway)**
+        - Add variables: `API_BASE_URL`, `API_KEY`, (optional) `USE_DEMO=1` to allow demo mode
+        - Start command: `streamlit run streamlit_app.py --server.port $PORT --server.address 0.0.0.0`
         """
     )
 
-# --------------------------- #
-#             Main            #
-# --------------------------- #
+# ---------- Router ----------
 
 def main():
-    pages = {
-        "🏠 Dashboard": page_dashboard,
-        "⚡ Quick Generate": page_quick_generate,
-        "📦 Batch Generation": page_batch_generation,
-        "✅ Verification": page_verification,
-        "📊 Dataset Management": page_datasets,
-        "🤖 ML Training": page_ml_training,
-        "🧪 ML Generation": page_ml_generation,
-        "📈 Analysis": page_analysis,
-        "🛠️ System Tools": page_tools,
-        "📚 Docs": page_docs,
-    }
-    pages[page]()
+    header()
+    with st.sidebar:
+        st.markdown("### Navigation")
+        page = st.radio(
+            "Go to",
+            ["🏠 Dashboard", "⚡ Quick Generate", "📦 Batch Generation", "✅ Verification", "📊 Datasets", "🤖 ML Training", "🧪 ML Generation", "📈 Analysis", "🛠️ Tools", "📚 Docs"],
+        )
+        st.markdown("---")
+        st.caption(f"API: {API_BASE_URL}")
+        st.caption(f"Demo mode: {'ON' if USE_DEMO else 'OFF'}")
+
+    if page == "🏠 Dashboard":
+        page_dashboard()
+    elif page == "⚡ Quick Generate":
+        page_quick_generate()
+    elif page == "📦 Batch Generation":
+        page_batch_generation()
+    elif page == "✅ Verification":
+        page_verify()
+    elif page == "📊 Datasets":
+        page_datasets()
+    elif page == "🤖 ML Training":
+        page_ml_training()
+    elif page == "🧪 ML Generation":
+        page_ml_generate()
+    elif page == "📈 Analysis":
+        page_analysis()
+    elif page == "🛠️ Tools":
+        page_tools()
+    else:
+        page_docs()
+
 
 if __name__ == "__main__":
     main()
