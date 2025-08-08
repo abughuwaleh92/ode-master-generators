@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ODE Master Generators — GUI</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="title">ODE Master Generators</span>
+    <span class="subtitle">Production GUI</span>
+  </div>
+  <nav class="nav">
+    <a href="#dashboard" class="nav-link">Dashboard</a>
+    <a href="#generate" class="nav-link">Generate</a>
+    <a href="#batch" class="nav-link">Batch</a>
+    <a href="#verify" class="nav-link">Verify</a>
+    <a href="#datasets" class="nav-link">Datasets</a>
+    <a href="#jobs" class="nav-link">Jobs</a>
+    <a href="#ml" class="nav-link">ML</a>
+    <a href="#settings" class="nav-link">Settings</a>
+  </nav>
+</header>
+
+<main class="container">
+
+  <!-- Notifications -->
+  <section id="notices" class="notices"></section>
+
+  <!-- Settings -->
+  <section id="settings" class="panel">
+    <h2>Settings</h2>
+    <div class="grid cols-3">
+      <div class="field">
+        <label>Backend Base URL</label>
+        <input id="baseUrl" placeholder="https://your-domain" />
+        <small>Leave empty to use same origin.</small>
+      </div>
+      <div class="field">
+        <label>X-API-Key</label>
+        <input id="apiKey" placeholder="your-api-key" />
+        <small>Must match an entry in server's API_KEYS.</small>
+      </div>
+      <div class="field">
+        <label>WebSocket</label>
+        <div class="row">
+          <button id="btnConnectWs">Connect</button>
+          <button id="btnDisconnectWs" class="secondary">Disconnect</button>
+        </div>
+        <small id="wsStatus">Disconnected</small>
+      </div>
+    </div>
+    <div class="row">
+      <button id="btnSaveSettings">Save</button>
+      <button id="btnPing" class="secondary">Ping Server</button>
+    </div>
+  </section>
+
+  <!-- Dashboard -->
+  <section id="dashboard" class="panel">
+    <h2>Dashboard</h2>
+    <div class="grid cols-4">
+      <div class="card">
+        <div class="metric" id="statGenerated">–</div>
+        <div class="metric-label">Generated (24h)</div>
+      </div>
+      <div class="card">
+        <div class="metric" id="statVerifyRate">–</div>
+        <div class="metric-label">Verification Rate</div>
+      </div>
+      <div class="card">
+        <div class="metric" id="statActiveJobs">–</div>
+        <div class="metric-label">Active Jobs</div>
+      </div>
+      <div class="card">
+        <div class="metric" id="statTotalJobs">–</div>
+        <div class="metric-label">Total Jobs in Memory</div>
+      </div>
+    </div>
+
+    <div class="grid cols-2">
+      <div class="panel inset">
+        <h3>Available Generators</h3>
+        <pre id="availableGenerators" class="pre"></pre>
+      </div>
+      <div class="panel inset">
+        <h3>Available Functions</h3>
+        <pre id="availableFunctions" class="pre"></pre>
+      </div>
+    </div>
+
+    <div class="panel inset">
+      <h3>Health</h3>
+      <pre id="healthStatus" class="pre"></pre>
+    </div>
+  </section>
+
+  <!-- Generate -->
+  <section id="generate" class="panel">
+    <h2>Generate ODEs</h2>
+    <div class="grid cols-4">
+      <div class="field">
+        <label>Generator</label>
+        <select id="genSelect"></select>
+      </div>
+      <div class="field">
+        <label>Function</label>
+        <select id="funcSelect"></select>
+      </div>
+      <div class="field">
+        <label>Count</label>
+        <input id="genCount" type="number" min="1" max="100" value="1">
+      </div>
+      <div class="field">
+        <label>Verify after generation</label>
+        <select id="verifyToggle">
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </select>
+      </div>
+    </div>
+
+    <details class="panel inset">
+      <summary>Optional Parameters (JSON)</summary>
+      <textarea id="paramJson" rows="6" placeholder='{"alpha": 0.5, "beta": 1.2, "M": 0.1, "q": 2, "v": 3, "a": 2}'></textarea>
+    </details>
+
+    <div class="row">
+      <label class="checkbox">
+        <input type="checkbox" id="streamToggle" checked /> Stream results over WebSocket
+      </label>
+    </div>
+    <div class="row">
+      <button id="btnGenerate">Start</button>
+    </div>
+
+    <div id="genJob" class="panel inset hidden">
+      <h3>Job <span id="genJobId"></span></h3>
+      <progress id="genProgress" value="0" max="100"></progress>
+      <div class="row">
+        <button class="secondary" id="btnRefreshGenJob">Refresh</button>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Generator</th>
+              <th>Function</th>
+              <th>Verified</th>
+              <th>Confidence</th>
+              <th>ODE</th>
+              <th>Solution</th>
+            </tr>
+          </thead>
+          <tbody id="genResults"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Batch -->
+  <section id="batch" class="panel">
+    <h2>Batch Generation</h2>
+    <div class="grid cols-3">
+      <div class="field">
+        <label>Generators (comma-separated)</label>
+        <input id="batchGenerators" placeholder="L1,L2,N1,N2">
+      </div>
+      <div class="field">
+        <label>Functions (comma-separated)</label>
+        <input id="batchFunctions" placeholder="identity,sine,cosine,exponential">
+      </div>
+      <div class="field">
+        <label>Samples per combination</label>
+        <input id="batchSamples" type="number" min="1" max="50" value="5">
+      </div>
+    </div>
+
+    <details class="panel inset">
+      <summary>Parameter Ranges (JSON)</summary>
+      <textarea id="batchParamRanges" rows="6" placeholder='{"alpha":[0,0.5,1.0], "beta":[0.5,1.0,2.0], "M":[0,0.1], "q":[2,3], "v":[2,3,4], "a":[2,3]}'></textarea>
+    </details>
+
+    <div class="grid cols-3">
+      <div class="field">
+        <label>Verify</label>
+        <select id="batchVerify">
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Save dataset</label>
+        <select id="batchSave">
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Dataset name (optional)</label>
+        <input id="batchDatasetName" placeholder="my_dataset">
+      </div>
+    </div>
+
+    <div class="row">
+      <button id="btnBatchGenerate">Start Batch</button>
+    </div>
+
+    <div id="batchJob" class="panel inset hidden">
+      <h3>Job <span id="batchJobId"></span></h3>
+      <progress id="batchProgress" value="0" max="100"></progress>
+      <pre id="batchMeta" class="pre"></pre>
+    </div>
+  </section>
+
+  <!-- Verify -->
+  <section id="verify" class="panel">
+    <h2>Verify an ODE + Solution</h2>
+    <div class="grid cols-2">
+      <div class="field">
+        <label>ODE (sympy format)</label>
+        <textarea id="verifyOde" rows="6" placeholder="Eq(Derivative(y(x), x, 2) + y(x), pi*sin(alpha + beta*exp(-x)))"></textarea>
+      </div>
+      <div class="field">
+        <label>Solution (sympy format)</label>
+        <textarea id="verifySol" rows="6" placeholder="pi*sin(alpha + beta*exp(-x))"></textarea>
+      </div>
+    </div>
+    <div class="grid cols-3">
+      <div class="field">
+        <label>Method</label>
+        <select id="verifyMethod">
+          <option value="substitution">substitution</option>
+          <option value="numerical">numerical</option>
+          <option value="series">series</option>
+          <option value="checkodesol">checkodesol</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Timeout (sec)</label>
+        <input id="verifyTimeout" type="number" min="1" max="300" value="30">
+      </div>
+    </div>
+    <div class="row">
+      <button id="btnVerify">Verify</button>
+    </div>
+    <div class="panel inset">
+      <h3>Verification Result</h3>
+      <pre id="verifyResult" class="pre"></pre>
+    </div>
+  </section>
+
+  <!-- Datasets -->
+  <section id="datasets" class="panel">
+    <h2>Datasets</h2>
+    <div class="row">
+      <button id="btnListDatasets">Refresh List</button>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Size (bytes)</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="datasetRows"></tbody>
+      </table>
+    </div>
+
+    <div class="panel inset">
+      <h3>Create dataset from Job</h3>
+      <div class="grid cols-3">
+        <div class="field">
+          <label>Job ID</label>
+          <input id="dsFromJobId" placeholder="uuid">
+        </div>
+        <div class="field">
+          <label>Dataset name</label>
+          <input id="dsName" placeholder="dataset_YYYYMMDD">
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button id="btnCreateDatasetFromJob">Create</button>
+        </div>
+      </div>
+      <small>Will read job results and persist via <code>/api/datasets/create</code>.</small>
+    </div>
+  </section>
+
+  <!-- Jobs -->
+  <section id="jobs" class="panel">
+    <h2>Jobs</h2>
+    <div class="grid cols-3">
+      <div class="field">
+        <label>Status filter</label>
+        <select id="jobFilter">
+          <option value="">(any)</option>
+          <option value="queued">queued</option>
+          <option value="running">running</option>
+          <option value="completed">completed</option>
+          <option value="failed">failed</option>
+          <option value="cancelled">cancelled</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Limit</label>
+        <input id="jobLimit" type="number" min="1" max="500" value="100">
+      </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <button id="btnListJobs">Refresh</button>
+      </div>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Job ID</th>
+            <th>Type</th>
+            <th>Status</th>
+            <th>Progress</th>
+            <th>Updated</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="jobRows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ML -->
+  <section id="ml" class="panel">
+    <h2>Machine Learning</h2>
+
+    <div class="panel inset">
+      <h3>Train</h3>
+      <div class="grid cols-4">
+        <div class="field">
+          <label>Dataset (name)</label>
+          <input id="mlDataset" placeholder="existing dataset name">
+        </div>
+        <div class="field">
+          <label>Model Type</label>
+          <select id="mlModelType">
+            <option value="pattern_net">pattern_net</option>
+            <option value="transformer">transformer</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Epochs</label>
+          <input id="mlEpochs" type="number" min="1" max="1000" value="10">
+        </div>
+        <div class="field">
+          <label>Batch Size</label>
+          <input id="mlBatch" type="number" min="8" max="256" value="32">
+        </div>
+      </div>
+      <div class="grid cols-4">
+        <div class="field">
+          <label>Learning Rate</label>
+          <input id="mlLR" type="number" step="0.0001" value="0.001">
+        </div>
+        <div class="field">
+          <label>Early Stopping</label>
+          <select id="mlES">
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Validation Split</label>
+          <input id="mlVal" type="number" min="0.1" max="0.5" step="0.05" value="0.2">
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button id="btnTrainModel">Start Training</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel inset">
+      <h3>Models</h3>
+      <div class="row">
+        <button id="btnListModels">List Models</button>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Size (bytes)</th>
+              <th>Created</th>
+              <th>Meta</th>
+            </tr>
+          </thead>
+          <tbody id="modelRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel inset">
+      <h3>Generate with Model</h3>
+      <div class="grid cols-4">
+        <div class="field">
+          <label>Model file (under models/)</label>
+          <input id="mlModelPath" placeholder="model.pth or jobid_pattern.pth">
+        </div>
+        <div class="field">
+          <label>Samples</label>
+          <input id="mlNSamples" type="number" min="1" max="1000" value="5">
+        </div>
+        <div class="field">
+          <label>Temperature</label>
+          <input id="mlTemp" type="number" step="0.1" value="0.8">
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button id="btnMLGenerate">Generate</button>
+        </div>
+      </div>
+      <div class="panel inset">
+        <pre id="mlGenResults" class="pre"></pre>
+      </div>
+    </div>
+
+  </section>
+
+</main>
+
+<footer class="footer">
+  <span>© <span id="year"></span> ODE Master Generators</span>
+  <span class="sep">•</span>
+  <span><a href="#settings">Settings</a></span>
+  <span class="sep">•</span>
+  <span>Built for Railway deployment</span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
