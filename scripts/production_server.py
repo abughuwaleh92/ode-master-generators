@@ -539,13 +539,20 @@ app = FastAPI(
     version="3.0.0",
     lifespan=lifespan
 )
-from pathlib import Path
 from fastapi.staticfiles import StaticFiles
-from gui.gui.ui import router as ui_router  # import your GUI router
+from fastapi.responses import FileResponse
+from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-app.mount("/static", StaticFiles(directory=BASE_DIR / "gui" / "gui" / "static"), name="static")
-app.include_router(ui_router, prefix="/ui", tags=["gui"])
+FRONTEND_DIST = Path(__file__).resolve().parents[1] / "gui" / "gui" / "dist"
+if FRONTEND_DIST.exists():
+    app.mount("/app", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="app")
+
+    @app.get("/app/{path:path}")
+    async def spa_catch_all(path: str):
+        index_file = FRONTEND_DIST / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
+        raise HTTPException(404, "UI not built")
 
 # CORS middleware for Railway
 app.add_middleware(
