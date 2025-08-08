@@ -1504,7 +1504,8 @@ def render_dataset_management():
         
         new_dataset_name = st.text_input(
             "Dataset Name",
-            value=f"custom_dataset_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            value=f"custom_dataset_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        )
        
        if st.button("💾 Save as Dataset"):
            with st.spinner("Creating dataset..."):
