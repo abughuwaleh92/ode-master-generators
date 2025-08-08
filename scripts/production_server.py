@@ -2,11 +2,16 @@
 """
 Production API server for ODE generation, verification, and ML integration
 Complete end-to-end workflow with batch generation, ML training, and novel ODE generation
+
+Key change: prefix-agnostic routing.
+- Set API_PREFIX (default "/api/v1") to control the canonical prefix.
+- Set EXPOSE_ROOT_API=1 to also expose alias endpoints at the root (no prefix).
 """
 
 import os
 import sys
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Request, Response, Body
+from fastapi import APIRouter
 from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ConfigDict
@@ -35,10 +40,8 @@ try:
     from verification.verifier import ODEVerifier
     from utils.config import ConfigManager
     from core.types import VerificationMethod
-    # from core.types import GeneratorType, ODEInstance  # if you need them at runtime
     from core.functions import AnalyticFunctionLibrary
 except Exception as e:
-    # If imports fail, we still want the server to boot to let health + demo fallback work
     logging.getLogger(__name__).error(f"Core module imports failed: {e}")
 
 # Configure logging
@@ -73,6 +76,15 @@ except Exception as e:
     logger.warning("ML features will be disabled. Install torch & scikit-learn to enable ML features.")
     ML_AVAILABLE = False
 
+# ---------- Env / Prefix config ----------
+
+API_PREFIX = os.getenv("API_PREFIX", "/api/v1").strip()
+# Normalize: allow "", "api/v1", "/api/v1"
+if API_PREFIX and not API_PREFIX.startswith("/"):
+    API_PREFIX = "/" + API_PREFIX
+EXPOSE_ROOT_API = os.getenv("EXPOSE_ROOT_API", "1").lower() in {"1", "true", "yes"}
+CANON_PREFIX = API_PREFIX or ""  # used for links in /
+
 # Initialize FastAPI app
 app = FastAPI(
     title="ODE Generation API",
@@ -97,7 +109,7 @@ USE_DEMO = os.getenv("USE_DEMO", "0") in ("1", "true", "True")
 # Redis configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 try:
-    if REDIS_URL.startswith("redis://") or REDIS_URL.startswith("rediss://"):
+    if REDIS_URL.startswith(("redis://", "rediss://")):
         redis_client = redis.from_url(REDIS_URL, decode_responses=True)
     else:
         redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
@@ -108,44 +120,24 @@ except Exception:
     logger.warning("Redis not available. Using in-memory storage.")
     REDIS_AVAILABLE = False
 
-    # Fallback tiny in-memory "redis" shim
     class FakeRedis:
         def __init__(self):
             self.storage: Dict[str, str] = {}
-
-        def setex(self, key, ttl, value):
-            self.storage[key] = value  # ignore ttl
-
-        def get(self, key):
-            return self.storage.get(key)
-
-        def set(self, key, value):
-            self.storage[key] = value
-
+        def setex(self, key, ttl, value): self.storage[key] = value
+        def get(self, key): return self.storage.get(key)
+        def set(self, key, value): self.storage[key] = value
         def incr(self, key):
-            try:
-                v = int(self.storage.get(key, "0"))
-            except ValueError:
-                v = 0
-            v += 1
-            self.storage[key] = str(v)
-            return v
-
-        def dbsize(self):
-            return len(self.storage)
-
-        def ping(self):
-            return True
-
+            try: v = int(self.storage.get(key, "0"))
+            except ValueError: v = 0
+            v += 1; self.storage[key] = str(v); return v
+        def dbsize(self): return len(self.storage)
+        def ping(self): return True
         def keys(self, pattern=None):
-            if not pattern:
-                return list(self.storage.keys())
+            if not pattern: return list(self.storage.keys())
             import fnmatch
             return [k for k in self.storage.keys() if fnmatch.fnmatch(k, pattern)]
-
         def delete(self, *keys):
-            for k in keys:
-                self.storage.pop(k, None)
+            for k in keys: self.storage.pop(k, None)
 
     redis_client = FakeRedis()
 
@@ -163,7 +155,6 @@ ml_generation_counter = Counter("ml_generation_total", "Total ML generations", [
 VALID_API_KEYS = [k.strip() for k in os.getenv("API_KEYS", "test-key,dev-key").split(",") if k.strip()]
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-
 def verify_api_key(api_key: Optional[str] = Depends(API_KEY_HEADER)):
     """Verify API key on protected endpoints."""
     if not api_key:
@@ -172,15 +163,14 @@ def verify_api_key(api_key: Optional[str] = Depends(API_KEY_HEADER)):
         raise HTTPException(status_code=403, detail="Invalid API key")
     return api_key
 
+# ---------- Pydantic models ----------
 
-# Pydantic models (Pydantic v2)
 class ODEGenerationRequest(BaseModel):
     generator: str = Field(..., description="Generator name (e.g., L1, N1)")
     function: str = Field(..., description="Function name (e.g., sine, exponential)")
     parameters: Optional[Dict[str, float]] = Field(default=None, description="ODE parameters")
     count: int = Field(1, ge=1, le=100, description="Number of ODEs to generate")
     verify: bool = Field(True, description="Whether to verify generated ODEs")
-
 
 class BatchGenerationRequest(BaseModel):
     generators: List[str] = Field(..., description="List of generators to use")
@@ -190,17 +180,14 @@ class BatchGenerationRequest(BaseModel):
     verify: bool = Field(True, description="Whether to verify generated ODEs")
     dataset_name: Optional[str] = Field(None, description="Name for the generated dataset")
 
-
 class ODEVerificationRequest(BaseModel):
     ode: str = Field(..., description="ODE equation as string")
     solution: str = Field(..., description="Proposed solution as string")
     method: str = Field("substitution", description="Verification method")
 
-
 class DatasetCreationRequest(BaseModel):
     odes: List[Dict[str, Any]] = Field(..., description="List of ODE data")
     dataset_name: Optional[str] = Field(None, description="Dataset name")
-
 
 class MLTrainingRequest(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
@@ -212,7 +199,6 @@ class MLTrainingRequest(BaseModel):
     early_stopping: bool = Field(True)
     config: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
-
 class MLGenerationRequest(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
     model_path: str = Field(..., description="Path to trained model")
@@ -221,7 +207,6 @@ class MLGenerationRequest(BaseModel):
     generator: Optional[str] = Field(None, description="Target generator style")
     function: Optional[str] = Field(None, description="Target function type")
     complexity_range: Optional[List[int]] = Field(None, description="Target complexity range")
-
 
 class ODEResponse(BaseModel):
     id: str
@@ -235,7 +220,6 @@ class ODEResponse(BaseModel):
     timestamp: str
     properties: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
-
 class JobStatus(BaseModel):
     job_id: str
     status: str
@@ -246,36 +230,26 @@ class JobStatus(BaseModel):
     updated_at: str
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
-
 class JobCreatedResponse(BaseModel):
     job_id: str
     status: str
     check_status_url: str
 
-
 class BatchJobCreatedResponse(JobCreatedResponse):
     total_expected: int
-
 
 # Background job manager
 class JobManager:
     def __init__(self):
         self.jobs: Dict[str, Dict[str, Any]] = {}
-
     async def create_job(self, job_type: str, params: Dict) -> str:
         job_id = str(uuid.uuid4())
         now = datetime.now().isoformat()
         job_data = {
-            "id": job_id,
-            "type": job_type,
-            "params": params,
-            "status": "pending",
-            "progress": 0.0,
-            "created_at": now,
-            "updated_at": now,
-            "results": None,
-            "error": None,
-            "metadata": {},
+            "id": job_id, "type": job_type, "params": params,
+            "status": "pending", "progress": 0.0,
+            "created_at": now, "updated_at": now,
+            "results": None, "error": None, "metadata": {},
         }
         if REDIS_AVAILABLE:
             redis_client.setex(f"job:{job_id}", 3600, json.dumps(job_data))
@@ -283,46 +257,37 @@ class JobManager:
             self.jobs[job_id] = job_data
         active_jobs_gauge.inc()
         return job_id
-
     async def update_job(self, job_id: str, updates: Dict):
         updates["updated_at"] = datetime.now().isoformat()
         if REDIS_AVAILABLE:
             data = redis_client.get(f"job:{job_id}")
             if data:
-                job = json.loads(data)
-                job.update(updates)
+                job = json.loads(data); job.update(updates)
                 redis_client.setex(f"job:{job_id}", 3600, json.dumps(job))
         else:
             if job_id in self.jobs:
                 self.jobs[job_id].update(updates)
-
     async def get_job(self, job_id: str) -> Optional[Dict]:
         if REDIS_AVAILABLE:
             data = redis_client.get(f"job:{job_id}")
             return json.loads(data) if data else None
         return self.jobs.get(job_id)
-
     async def complete_job(self, job_id: str, results: Any):
         await self.update_job(job_id, {"status": "completed", "progress": 100.0, "results": results, "completed_at": datetime.now().isoformat()})
         active_jobs_gauge.dec()
-
     async def fail_job(self, job_id: str, error: str):
         await self.update_job(job_id, {"status": "failed", "error": error, "failed_at": datetime.now().isoformat()})
         active_jobs_gauge.dec()
-
     def active_count(self) -> int:
         if REDIS_AVAILABLE:
             cnt = 0
             for key in redis_client.keys("job:*"):
                 try:
                     j = json.loads(redis_client.get(key) or "{}")
-                    if j.get("status") in ("pending", "running"):
-                        cnt += 1
-                except Exception:
-                    pass
+                    if j.get("status") in ("pending", "running"): cnt += 1
+                except Exception: pass
             return cnt
         return sum(1 for j in self.jobs.values() if j.get("status") in ("pending", "running"))
-
 
 job_manager = JobManager()
 
@@ -339,15 +304,18 @@ try:
     logger.info("Testing generators...")
     WORKING_GENERATORS = ode_generator.test_generators()
     AVAILABLE_GENERATORS = list(WORKING_GENERATORS.get("linear", {}).keys()) + list(WORKING_GENERATORS.get("nonlinear", {}).keys())
-    # assuming generator exposes function library
-    AVAILABLE_FUNCTIONS = list(getattr(ode_generator, "f_library", AnalyticFunctionLibrary()).keys())  # fallback to library
-
+    # if f_library is dict-like:
+    try:
+        lib = getattr(ode_generator, "f_library", None) or AnalyticFunctionLibrary()
+        AVAILABLE_FUNCTIONS = list(lib.keys())  # type: ignore[attr-defined]
+    except Exception:
+        AVAILABLE_FUNCTIONS = []
     logger.info(f"Available generators: {AVAILABLE_GENERATORS}")
     logger.info(f"Available functions: {len(AVAILABLE_FUNCTIONS)} functions")
 except Exception as e:
     logger.error(f"Failed to initialize generators: {e}")
 
-# Demo fallback so the GUI can still work if bootstrapping fails
+# Demo fallback
 if USE_DEMO and (not AVAILABLE_GENERATORS or not AVAILABLE_FUNCTIONS):
     logger.warning("USE_DEMO enabled: providing fallback generators/functions")
     AVAILABLE_GENERATORS = ["L1", "L2", "L3", "L4", "N1", "N2", "N3", "N4", "N5", "N6", "N7"]
@@ -360,7 +328,6 @@ if USE_DEMO and (not AVAILABLE_GENERATORS or not AVAILABLE_FUNCTIONS):
         "rational_simple", "rational_stable",
         "exp_sin", "gaussian",
     ]
-
 
 # Middleware for metrics
 @app.middleware("http")
@@ -378,8 +345,11 @@ async def track_metrics(request: Request, call_next):
         pass
     return response
 
+# ---------- Root / health / metrics ----------
 
-# ---------- API Endpoints ----------
+def _p(path: str) -> str:
+    """Prefix helper for discovery payload."""
+    return f"{CANON_PREFIX}{path}"
 
 @app.get("/")
 async def root():
@@ -395,19 +365,18 @@ async def root():
             "redoc": "/redoc",
             "metrics": "/metrics",
             "api": {
-                "generate": "/api/v1/generate",
-                "batch_generate": "/api/v1/batch_generate",
-                "verify": "/api/v1/verify",
-                "datasets": {"create": "/api/v1/datasets/create", "list": "/api/v1/datasets"},
-                "jobs": "/api/v1/jobs/{job_id}",
-                "stats": "/api/v1/stats",
-                "generators": "/api/v1/generators",
-                "functions": "/api/v1/functions",
-                "ml": {"train": "/api/v1/ml/train", "generate": "/api/v1/ml/generate", "models": "/api/v1/models"},
+                "generate": _p("/generate"),
+                "batch_generate": _p("/batch_generate"),
+                "verify": _p("/verify"),
+                "datasets": {"create": _p("/datasets/create"), "list": _p("/datasets")},
+                "jobs": _p("/jobs/{job_id}"),
+                "stats": _p("/stats"),
+                "generators": _p("/generators"),
+                "functions": _p("/functions"),
+                "ml": {"train": _p("/ml/train"), "generate": _p("/ml/generate"), "models": _p("/models")},
             },
         },
     }
-
 
 @app.get("/health")
 async def health_check():
@@ -420,8 +389,15 @@ async def health_check():
         "functions": len(AVAILABLE_FUNCTIONS),
     }
 
+@app.get("/metrics")
+async def get_metrics():
+    return Response(content=generate_latest(), media_type="text/plain")
 
-@app.post("/api/v1/generate", response_model=JobCreatedResponse)
+# ---------- Versioned/Unversioned API router ----------
+
+api_router = APIRouter()
+
+@api_router.post("/generate", response_model=JobCreatedResponse)
 async def generate_odes(
     request: ODEGenerationRequest,
     background_tasks: BackgroundTasks,
@@ -434,10 +410,9 @@ async def generate_odes(
 
     job_id = await job_manager.create_job("generation", request.model_dump())
     background_tasks.add_task(process_generation_job, job_id, request)
-    return JobCreatedResponse(job_id=job_id, status="Job created", check_status_url=f"/api/v1/jobs/{job_id}")
+    return JobCreatedResponse(job_id=job_id, status="Job created", check_status_url=f"{CANON_PREFIX}/jobs/{job_id}")
 
-
-@app.post("/api/v1/batch_generate", response_model=BatchJobCreatedResponse)
+@api_router.post("/batch_generate", response_model=BatchJobCreatedResponse)
 async def batch_generate_odes(
     request: BatchGenerationRequest,
     background_tasks: BackgroundTasks,
@@ -454,11 +429,10 @@ async def batch_generate_odes(
     background_tasks.add_task(process_batch_generation_job, job_id, request)
     total_expected = len(request.generators) * len(request.functions) * request.samples_per_combination
     return BatchJobCreatedResponse(
-        job_id=job_id, status="Batch generation job created", check_status_url=f"/api/v1/jobs/{job_id}", total_expected=total_expected
+        job_id=job_id, status="Batch generation job created", check_status_url=f"{CANON_PREFIX}/jobs/{job_id}", total_expected=total_expected
     )
 
-
-@app.post("/api/v1/verify")
+@api_router.post("/verify")
 async def verify_ode(
     request: ODEVerificationRequest,
     api_key: str = Depends(verify_api_key),
@@ -466,7 +440,6 @@ async def verify_ode(
     try:
         ode_expr = sp.sympify(request.ode)
         solution_expr = sp.sympify(request.solution)
-        # Try to pass method if your verifier supports it
         try:
             verified, method_used, confidence = ode_verifier.verify(ode_expr, solution_expr, method=request.method)  # type: ignore
             method_str = method_used.value if isinstance(method_used, VerificationMethod) else str(method_used)
@@ -488,45 +461,27 @@ async def verify_ode(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-
-@app.post("/api/v1/datasets/create")
+@api_router.post("/datasets/create")
 async def create_dataset(
     request: DatasetCreationRequest = Body(...),
     api_key: str = Depends(verify_api_key),
 ):
     name = request.dataset_name or f"dataset_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    data_dir = Path("data")
-    data_dir.mkdir(exist_ok=True)
+    data_dir = Path("data"); data_dir.mkdir(exist_ok=True)
     dataset_path = data_dir / f"{name}.jsonl"
     with open(dataset_path, "w", encoding="utf-8") as f:
         for ode in request.odes:
             f.write(json.dumps(ode, ensure_ascii=False) + "\n")
-
-    dataset_info = {
-        "name": name,
-        "path": str(dataset_path),
-        "size": len(request.odes),
-        "created_at": datetime.now().isoformat(),
-    }
-
+    dataset_info = {"name": name, "path": str(dataset_path), "size": len(request.odes), "created_at": datetime.now().isoformat()}
     try:
         redis_client.setex(f"dataset:{name}", 86400, json.dumps(dataset_info))
     except Exception:
         pass
+    return {"dataset_name": name, "path": str(dataset_path), "size": len(request.odes), "message": "Dataset created successfully"}
 
-    return {
-        "dataset_name": name,
-        "path": str(dataset_path),
-        "size": len(request.odes),
-        "message": "Dataset created successfully",
-    }
-
-
-@app.get("/api/v1/datasets")
+@api_router.get("/datasets")
 async def list_datasets(api_key: str = Depends(verify_api_key)):
     datasets: List[Dict[str, Any]] = []
-
-    # Redis cache (recent datasets)
     try:
         if REDIS_AVAILABLE:
             for key in redis_client.keys("dataset:*"):
@@ -535,8 +490,6 @@ async def list_datasets(api_key: str = Depends(verify_api_key)):
                     datasets.append(json.loads(dataset_info))
     except Exception:
         pass
-
-    # Filesystem scan
     data_dir = Path("data")
     if data_dir.exists():
         for file_path in data_dir.glob("*.jsonl"):
@@ -553,11 +506,9 @@ async def list_datasets(api_key: str = Depends(verify_api_key)):
                         "created_at": datetime.fromtimestamp(stat.st_ctime).isoformat(),
                     }
                 )
-
     return {"datasets": datasets, "count": len(datasets)}
 
-
-@app.get("/api/v1/jobs/{job_id}", response_model=JobStatus)
+@api_router.get("/jobs/{job_id}", response_model=JobStatus)
 async def get_job_status(job_id: str, api_key: str = Depends(verify_api_key)):
     job = await job_manager.get_job(job_id)
     if not job:
@@ -573,8 +524,7 @@ async def get_job_status(job_id: str, api_key: str = Depends(verify_api_key)):
         metadata=job.get("metadata", {}),
     )
 
-
-@app.post("/api/v1/ml/train")
+@api_router.post("/ml/train")
 async def train_ml_model(
     request: MLTrainingRequest,
     background_tasks: BackgroundTasks,
@@ -582,13 +532,11 @@ async def train_ml_model(
 ):
     if not ML_AVAILABLE:
         raise HTTPException(status_code=503, detail="ML features are not available. Please install torch & scikit-learn.")
-
     job_id = await job_manager.create_job("ml_training", request.model_dump())
     background_tasks.add_task(process_ml_training_job, job_id, request)
-    return {"job_id": job_id, "status": "Training job created", "check_status_url": f"/api/v1/jobs/{job_id}"}
+    return {"job_id": job_id, "status": "Training job created", "check_status_url": f"{CANON_PREFIX}/jobs/{job_id}"}
 
-
-@app.post("/api/v1/ml/generate")
+@api_router.post("/ml/generate")
 async def generate_with_ml(
     request: MLGenerationRequest,
     background_tasks: BackgroundTasks,
@@ -596,13 +544,11 @@ async def generate_with_ml(
 ):
     if not ML_AVAILABLE:
         raise HTTPException(status_code=503, detail="ML features are not available. Please install torch & scikit-learn.")
-
     job_id = await job_manager.create_job("ml_generation", request.model_dump())
     background_tasks.add_task(process_ml_generation_job, job_id, request)
-    return {"job_id": job_id, "status": "ML generation job created", "check_status_url": f"/api/v1/jobs/{job_id}"}
+    return {"job_id": job_id, "status": "ML generation job created", "check_status_url": f"{CANON_PREFIX}/jobs/{job_id}"}
 
-
-@app.get("/api/v1/generators")
+@api_router.get("/generators")
 async def list_generators(api_key: str = Depends(verify_api_key)):
     return {
         "linear": list(WORKING_GENERATORS.get("linear", {}).keys()),
@@ -611,8 +557,7 @@ async def list_generators(api_key: str = Depends(verify_api_key)):
         "total": len(AVAILABLE_GENERATORS),
     }
 
-
-@app.get("/api/v1/functions")
+@api_router.get("/functions")
 async def list_functions(api_key: str = Depends(verify_api_key)):
     function_categories = {
         "polynomial": ["identity", "quadratic", "cubic", "quartic", "quintic"],
@@ -625,12 +570,10 @@ async def list_functions(api_key: str = Depends(verify_api_key)):
     }
     return {"functions": AVAILABLE_FUNCTIONS, "categories": function_categories, "count": len(AVAILABLE_FUNCTIONS)}
 
-
-@app.get("/api/v1/models")
+@api_router.get("/models")
 async def list_ml_models(api_key: str = Depends(verify_api_key)):
     models_dir = Path("models")
     models: List[Dict[str, Any]] = []
-
     if models_dir.exists():
         for model_path in models_dir.glob("*.pth"):
             try:
@@ -650,15 +593,12 @@ async def list_ml_models(api_key: str = Depends(verify_api_key)):
                 )
             except Exception as e:
                 logger.error(f"Error loading model {model_path}: {e}")
-
     return {"models": models, "count": len(models), "ml_enabled": ML_AVAILABLE}
 
-
-@app.get("/api/v1/stats")
+@api_router.get("/stats")
 async def get_statistics(api_key: str = Depends(verify_api_key)):
     total_generated = int(redis_client.get("metric:total_generated_24h") or 0)
     verification_success_rate = float(redis_client.get("metric:verification_success_rate") or 0.0)
-
     generator_stats: Dict[str, Dict[str, Any]] = {}
     for gen in AVAILABLE_GENERATORS:
         success_rate = float(redis_client.get(f"metric:generator:{gen}:success_rate") or 0.0)
@@ -671,7 +611,6 @@ async def get_statistics(api_key: str = Depends(verify_api_key)):
             "total_generated": total,
             "total_verified": verified,
         }
-
     return {
         "status": "operational",
         "total_generated_24h": total_generated,
@@ -684,13 +623,15 @@ async def get_statistics(api_key: str = Depends(verify_api_key)):
         "redis_enabled": REDIS_AVAILABLE,
     }
 
+# Mount router at canonical prefix
+app.include_router(api_router, prefix=CANON_PREFIX, tags=["api"])
 
-@app.get("/metrics")
-async def get_metrics():
-    return Response(content=generate_latest(), media_type="text/plain")
+# Optional root alias (docs-hidden) for compatibility with UIs that call root paths
+if EXPOSE_ROOT_API and CANON_PREFIX:
+    app.include_router(api_router, prefix="", include_in_schema=False, tags=["api-compat"])
+    logger.info("Root alias for API endpoints is enabled (EXPOSE_ROOT_API=1).")
 
-
-# ---------- Background job processors ----------
+# ---------- Background job processors (unchanged) ----------
 
 async def process_generation_job(job_id: str, request: ODEGenerationRequest):
     try:
@@ -703,7 +644,6 @@ async def process_generation_job(job_id: str, request: ODEGenerationRequest):
 
         generator = all_generators[request.generator]
         gen_type = "linear" if request.generator in WORKING_GENERATORS.get("linear", {}) else "nonlinear"
-
         base_params = request.parameters or getattr(ode_generator, "sample_parameters", lambda: {})()
 
         with generation_time_histogram.time():
@@ -712,18 +652,11 @@ async def process_generation_job(job_id: str, request: ODEGenerationRequest):
                     job_id,
                     {"progress": (i / request.count) * 100.0, "metadata": {"current": i, "total": request.count, "status": f"Generating ODE {i+1}/{request.count}"}},
                 )
-
-                # Time single generation for metrics/avg update
                 t0 = time.time()
                 try:
                     ode_instance = ode_generator.generate_single_ode(
-                        generator=generator,
-                        gen_type=gen_type,
-                        gen_name=request.generator,
-                        f_key=request.function,
-                        ode_id=i,
-                        params=base_params,
-                        verify=request.verify,
+                        generator=generator, gen_type=gen_type, gen_name=request.generator,
+                        f_key=request.function, ode_id=i, params=base_params, verify=request.verify,
                     )
                 except TypeError:
                     ode_instance = ode_generator.generate_single_ode(
@@ -740,7 +673,7 @@ async def process_generation_job(job_id: str, request: ODEGenerationRequest):
                         "complexity": int(ode_instance.complexity_score),
                         "generator": ode_instance.generator_name,
                         "function": ode_instance.function_name,
-                        "parameters": dict(ode_instance.parameters) if hasattr(ode_instance, "parameters") else base_params,
+                        "parameters": dict(getattr(ode_instance, "parameters", base_params)),
                         "timestamp": datetime.now().isoformat(),
                         "properties": {
                             "operation_count": getattr(ode_instance, "operation_count", None),
@@ -749,22 +682,18 @@ async def process_generation_job(job_id: str, request: ODEGenerationRequest):
                             "has_pantograph": getattr(ode_instance, "has_pantograph", False),
                             "verification_confidence": getattr(ode_instance, "verification_confidence", 0.0),
                             "verification_method": getattr(ode_instance, "verification_method", VerificationMethod.SUBSTITUTION).value
-                            if hasattr(ode_instance, "verification_method")
-                            else "unknown",
+                            if hasattr(ode_instance, "verification_method") else "unknown",
                             "initial_conditions": getattr(ode_instance, "initial_conditions", {}),
                             "generation_time_ms": gen_time * 1000.0,
                         },
                     }
                     results.append(response_data)
-
-                    # Metrics
                     ode_generation_counter.labels(generator=request.generator, function=request.function).inc()
                     try:
                         redis_client.incr("metric:total_generated_24h")
                         total = redis_client.incr(f"metric:generator:{request.generator}:total")
                         if response_data["verified"]:
                             redis_client.incr(f"metric:generator:{request.generator}:verified")
-                        # rolling avg gen time
                         prev_avg = float(redis_client.get(f"metric:generator:{request.generator}:avg_time") or 0.0)
                         prev_count = max(int(total) - 1, 0)
                         new_avg = (prev_avg * prev_count + gen_time) / max(prev_count + 1, 1)
@@ -772,7 +701,6 @@ async def process_generation_job(job_id: str, request: ODEGenerationRequest):
                     except Exception:
                         pass
 
-        # Success rate per job
         if results:
             verified_count = sum(1 for r in results if r.get("verified"))
             try:
@@ -788,15 +716,12 @@ async def process_generation_job(job_id: str, request: ODEGenerationRequest):
         logger.error(f"Generation job failed: {e}\n{traceback.format_exc()}")
         await job_manager.fail_job(job_id, str(e))
 
-
 async def process_batch_generation_job(job_id: str, request: BatchGenerationRequest):
     try:
         await job_manager.update_job(job_id, {"status": "running"})
         results: List[Dict[str, Any]] = []
-
         total_combos = len(request.generators) * len(request.functions) * request.samples_per_combination
         current = 0
-
         param_ranges = request.parameters or {
             "alpha": [0, 0.5, 1, 1.5, 2],
             "beta": [0.5, 1, 1.5, 2],
@@ -805,7 +730,6 @@ async def process_batch_generation_job(job_id: str, request: BatchGenerationRequ
             "v": [2, 3, 4],
             "a": [2, 3, 4],
         }
-
         all_generators = {**WORKING_GENERATORS.get("linear", {}), **WORKING_GENERATORS.get("nonlinear", {})}
         dataset_info = None
 
@@ -824,16 +748,12 @@ async def process_batch_generation_job(job_id: str, request: BatchGenerationRequ
                         {
                             "progress": (current / max(total_combos, 1)) * 100.0,
                             "metadata": {
-                                "current": current,
-                                "total": total_combos,
-                                "current_generator": gen_name,
-                                "current_function": func_name,
+                                "current": current, "total": total_combos,
+                                "current_generator": gen_name, "current_function": func_name,
                                 "status": f"Generating {gen_name} + {func_name} ({current}/{total_combos})",
                             },
                         },
                     )
-
-                    # Sample params
                     params: Dict[str, Any] = {}
                     for pname, pvalues in param_ranges.items():
                         params[pname] = (np.random.choice(pvalues) if isinstance(pvalues, list) and pvalues else pvalues)
@@ -843,13 +763,8 @@ async def process_batch_generation_job(job_id: str, request: BatchGenerationRequ
                     t0 = time.time()
                     try:
                         ode_instance = ode_generator.generate_single_ode(
-                            generator=generator,
-                            gen_type=gen_type,
-                            gen_name=gen_name,
-                            f_key=func_name,
-                            ode_id=len(results),
-                            params=params,
-                            verify=request.verify,
+                            generator=generator, gen_type=gen_type, gen_name=gen_name,
+                            f_key=func_name, ode_id=len(results), params=params, verify=request.verify,
                         )
                     except TypeError:
                         ode_instance = ode_generator.generate_single_ode(
@@ -876,8 +791,7 @@ async def process_batch_generation_job(job_id: str, request: BatchGenerationRequ
                             "has_pantograph": getattr(ode_instance, "has_pantograph", False),
                             "verified": bool(getattr(ode_instance, "verified", False)),
                             "verification_method": getattr(ode_instance, "verification_method", VerificationMethod.SUBSTITUTION).value
-                            if hasattr(ode_instance, "verification_method")
-                            else "unknown",
+                            if hasattr(ode_instance, "verification_method") else "unknown",
                             "verification_confidence": float(getattr(ode_instance, "verification_confidence", 0.0)),
                             "generation_time": float(gen_time),
                             "timestamp": datetime.now().isoformat(),
@@ -896,16 +810,13 @@ async def process_batch_generation_job(job_id: str, request: BatchGenerationRequ
                         ode_generation_counter.labels(generator=gen_name, function=func_name).inc()
 
         if request.dataset_name and results:
-            data_dir = Path("data")
-            data_dir.mkdir(exist_ok=True)
+            data_dir = Path("data"); data_dir.mkdir(exist_ok=True)
             dataset_path = data_dir / f"{request.dataset_name}.jsonl"
             with open(dataset_path, "w", encoding="utf-8") as f:
                 for ode in results:
                     f.write(json.dumps(ode, ensure_ascii=False) + "\n")
             dataset_info = {
-                "name": request.dataset_name,
-                "path": str(dataset_path),
-                "size": len(results),
+                "name": request.dataset_name, "path": str(dataset_path), "size": len(results),
                 "created_at": datetime.now().isoformat(),
                 "generators": list({r["generator_name"] for r in results}),
                 "functions": list({r["function_name"] for r in results}),
@@ -941,16 +852,12 @@ async def process_batch_generation_job(job_id: str, request: BatchGenerationRequ
         logger.error(f"Batch generation job failed: {e}\n{traceback.format_exc()}")
         await job_manager.fail_job(job_id, str(e))
 
-
 async def process_ml_training_job(job_id: str, request: MLTrainingRequest):
     if not ML_AVAILABLE:
         await job_manager.fail_job(job_id, "ML features not available")
         return
-
     try:
         await job_manager.update_job(job_id, {"status": "running"})
-
-        # Resolve dataset path
         dataset_path: Optional[Path] = None
         try:
             if REDIS_AVAILABLE:
@@ -959,35 +866,23 @@ async def process_ml_training_job(job_id: str, request: MLTrainingRequest):
                     dataset_path = Path(json.loads(ds_info)["path"])
         except Exception:
             pass
-
         if not dataset_path or not dataset_path.exists():
             p = Path(request.dataset)
             candidates = [p, Path("data") / request.dataset, Path("data") / f"{request.dataset}.jsonl"]
             dataset_path = next((c for c in candidates if c.exists()), None)
-
         if not dataset_path or not dataset_path.exists():
             available = [f.stem for f in Path("data").glob("*.jsonl")] if Path("data").exists() else []
             raise FileNotFoundError(f"Dataset not found: {request.dataset}. Available datasets: {available}")
 
         trainer = ODEGeneratorTrainer(dataset_path=str(dataset_path), features_path=None)
-
         await job_manager.update_job(
             job_id,
-            {
-                "metadata": {
-                    "dataset_size": len(trainer.df),
-                    "dataset_path": str(dataset_path),
-                    "model_type": request.model_type,
-                    "status": "Training started",
-                    "current_epoch": 0,
-                    "total_epochs": request.epochs,
-                }
-            },
+            {"metadata": {"dataset_size": len(trainer.df), "dataset_path": str(dataset_path),
+                          "model_type": request.model_type, "status": "Training started",
+                          "current_epoch": 0, "total_epochs": request.epochs}}
         )
 
-        # Run training in executor to avoid blocking the loop
         loop = asyncio.get_event_loop()
-        model_id: str
         if request.model_type == "pattern_net":
             model = await loop.run_in_executor(None, trainer.train_pattern_network, request.epochs, request.batch_size)
             model_id = f"pattern_net_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -1028,24 +923,15 @@ async def process_ml_training_job(job_id: str, request: MLTrainingRequest):
                 avg_loss = epoch_loss / max(len(train_loader), 1)
                 await job_manager.update_job(
                     job_id,
-                    {
-                        "progress": ((epoch + 1) / request.epochs) * 100.0,
-                        "metadata": {
-                            "current_epoch": epoch + 1,
-                            "total_epochs": request.epochs,
-                            "current_loss": float(avg_loss),
-                            "status": f"Epoch {epoch + 1}/{request.epochs}",
-                        },
-                    },
+                    {"progress": ((epoch + 1) / request.epochs) * 100.0,
+                     "metadata": {"current_epoch": epoch + 1, "total_epochs": request.epochs,
+                                  "current_loss": float(avg_loss), "status": f"Epoch {epoch + 1}/{request.epochs}"}}
                 )
-                if avg_loss < best_loss:
-                    best_loss = avg_loss
             model_id = f"vae_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         else:
             raise ValueError(f"Unknown model type: {request.model_type}")
 
-        model_dir = Path("models")
-        model_dir.mkdir(exist_ok=True)
+        model_dir = Path("models"); model_dir.mkdir(exist_ok=True)
         model_path = model_dir / f"{model_id}.pth"
 
         if request.model_type == "vae":
@@ -1068,13 +954,10 @@ async def process_ml_training_job(job_id: str, request: MLTrainingRequest):
             torch.save(model, model_path)
 
         metadata = {
-            "model_id": model_id,
-            "model_type": request.model_type,
-            "dataset": str(request.dataset),
-            "dataset_path": str(dataset_path),
+            "model_id": model_id, "model_type": request.model_type,
+            "dataset": str(request.dataset), "dataset_path": str(dataset_path),
             "training_config": request.model_dump(),
-            "created_at": datetime.now().isoformat(),
-            "model_path": str(model_path),
+            "created_at": datetime.now().isoformat(), "model_path": str(model_path),
         }
         metadata_path = model_path.with_suffix(".json")
         metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -1093,24 +976,19 @@ async def process_ml_training_job(job_id: str, request: MLTrainingRequest):
             pass
         await job_manager.fail_job(job_id, str(e))
 
-
 async def process_ml_generation_job(job_id: str, request: MLGenerationRequest):
     if not ML_AVAILABLE:
         await job_manager.fail_job(job_id, "ML features not available")
         return
-
     try:
         await job_manager.update_job(job_id, {"status": "running"})
-
         model_path = Path(request.model_path)
         if not model_path.exists():
             model_path = Path("models") / request.model_path
             if not model_path.exists():
                 raise FileNotFoundError(f"Model not found: {request.model_path}")
 
-        device = "cuda" if (hasattr(torch, "cuda") and torch.cuda.is_available()) else "cpu"
-
-        # Prefer metadata sidecar
+        device = "cuda" if ("cuda" in dir(torch) and torch.cuda.is_available()) else "cpu"
         model_type = "unknown"
         meta_path = model_path.with_suffix(".json")
         if meta_path.exists():
@@ -1119,8 +997,6 @@ async def process_ml_generation_job(job_id: str, request: MLGenerationRequest):
                 model_type = metadata.get("model_type", model_type)
             except Exception:
                 pass
-
-        # torch.load may return a dict (VAE checkpoint) or a model object
         try:
             checkpoint = torch.load(model_path, map_location=device)
             if isinstance(checkpoint, dict) and "model_type" in checkpoint:
@@ -1130,16 +1006,15 @@ async def process_ml_generation_job(job_id: str, request: MLGenerationRequest):
 
         generators = [request.generator] if request.generator else (AVAILABLE_GENERATORS[:5] or ["L1"])
         functions = [request.function] if request.function else (AVAILABLE_FUNCTIONS[:5] or ["sine"])
-
         generated_odes: List[Dict[str, Any]] = []
         for i in range(request.n_samples):
             await job_manager.update_job(
                 job_id,
-                {"progress": (i / max(request.n_samples, 1)) * 100.0, "metadata": {"current": i, "total": request.n_samples, "status": f"Generating ODE {i+1}/{request.n_samples}"}},
+                {"progress": (i / max(request.n_samples, 1)) * 100.0,
+                 "metadata": {"current": i, "total": request.n_samples, "status": f"Generating ODE {i+1}/{request.n_samples}"}}
             )
             gen = str(np.random.choice(generators))
             func = str(np.random.choice(functions))
-            # Placeholder; real implementation would rely on the model to generate
             ode_data = {
                 "id": f"ml_{uuid.uuid4().hex[:8]}",
                 "ode": f"y''(x) + y(x) = pi*{func}(x)",
@@ -1155,18 +1030,15 @@ async def process_ml_generation_job(job_id: str, request: MLGenerationRequest):
             generated_odes.append(ode_data)
 
         results = {"odes": generated_odes, "metrics": {"total_generated": len(generated_odes), "model_used": str(model_path), "model_type": model_type}}
-
         try:
             ml_generation_counter.labels(model_type=str(model_type)).inc()
         except Exception:
             pass
-
         await job_manager.complete_job(job_id, results)
 
     except Exception as e:
         logger.error(f"ML generation job failed: {e}\n{traceback.format_exc()}")
         await job_manager.fail_job(job_id, str(e))
-
 
 # ---------- Startup/Shutdown ----------
 
@@ -1177,15 +1049,14 @@ async def startup_event():
     logger.info(f"ML features available: {ML_AVAILABLE}")
     logger.info(f"Working generators: {len(AVAILABLE_GENERATORS)}")
     logger.info(f"Available functions: {len(AVAILABLE_FUNCTIONS)}")
+    logger.info(f"API_PREFIX: {CANON_PREFIX or '(none)'} | EXPOSE_ROOT_API: {EXPOSE_ROOT_API}")
     for directory in ["models", "data", "ml_data", "logs"]:
         Path(directory).mkdir(exist_ok=True)
     logger.info("Server startup complete")
 
-
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("ODE API Server shutting down")
-
 
 if __name__ == "__main__":
     import uvicorn
