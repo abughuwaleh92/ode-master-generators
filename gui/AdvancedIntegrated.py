@@ -1,15 +1,20 @@
-# streamlit_app.py
 """
-ODE Master Generator — Enhanced Streamlit UI
-============================================
+ODE Master Generator — Prefix-agnostic Streamlit GUI
+----------------------------------------------------
 
-Improvements for Railway deployment:
-- Automatic API endpoint discovery
-- Robust connection retry logic  
-- Better error messages with troubleshooting hints
-- Connection status indicators
-- Fallback to demo mode automatically
-- Support for various API configurations
+Key features:
+- No baked-in /api/v1. The client auto-discovers the correct prefix
+  by probing the root (/) and trying both "" and "/api/v1".
+- Robust normalization for endpoint responses with different shapes.
+- End-to-end pages: Dashboard, Quick Generate, Batch, Verify, Datasets,
+  ML Train, ML Generate, Analysis, Tools, Docs.
+- Optional demo fallback (USE_DEMO=1) if the API is unreachable.
+
+Environment:
+  API_BASE_URL=https://your-api.example.com           # no trailing slash
+  API_KEY=your-key
+  API_PREFIX=                                        # "", "api/v1", or "/api/v1" (optional override)
+  USE_DEMO=0|1
 """
 
 from __future__ import annotations
@@ -20,7 +25,6 @@ import json
 import base64
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse, urljoin
 
 import numpy as np
 import pandas as pd
@@ -29,950 +33,613 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Optional for parsing/plotting
+# Optional SymPy for plotting the solution
 try:
     import sympy as sp
 except Exception:
     sp = None
 
 # ---------- Config ----------
+st.set_page_config(page_title="ODE Master Generator", page_icon="🔬", layout="wide", initial_sidebar_state="expanded")
 
-st.set_page_config(
-    page_title="ODE Master Generator",
-    page_icon="🔬",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# Environment variables with Railway-friendly defaults
-API_BASE_URL = os.getenv("API_BASE_URL", "").strip()
-if not API_BASE_URL:
-    # Try Railway internal URL first, then localhost
-    RAILWAY_PRIVATE_DOMAIN = os.getenv("RAILWAY_PRIVATE_DOMAIN", "")
-    if RAILWAY_PRIVATE_DOMAIN:
-        API_BASE_URL = f"http://{RAILWAY_PRIVATE_DOMAIN}"
-    else:
-        API_BASE_URL = "http://localhost:8000"
-
-API_BASE_URL = API_BASE_URL.rstrip("/")
+API_BASE_URL = (os.getenv("API_BASE_URL") or "https://ode-api-production.up.railway.app").rstrip("/")
 API_KEY = os.getenv("API_KEY", "test-key")
-USE_DEMO = str(os.getenv("USE_DEMO", "1")).lower() in {"1", "true", "yes", "on"}
-REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
+RAW_PREFIX = os.getenv("API_PREFIX", "").strip()
+USE_DEMO = str(os.getenv("USE_DEMO", "0")).lower() in {"1", "true", "yes"}
+REQUEST_TIMEOUT = 30
 
-# ---------- Styling ----------
-
+# ---------- Styles ----------
 st.markdown(
     """
     <style>
-      .app-header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:18px 22px;border-radius:14px;color:#fff;margin-bottom:18px;box-shadow:0 8px 20px rgba(0,0,0,.08)}
-      .metric-card{background:#fff;padding:14px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin-bottom:8px}
-      .info-box{background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px}
-      .warn-box{background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px}
-      .error-box{background:#fee;border:1px solid #fcc;border-radius:10px;padding:12px}
-      .success-box{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px}
-      .ok-dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#10b981;margin-right:8px;box-shadow:0 0 8px #10b981}
-      .bad-dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;margin-right:8px;box-shadow:0 0 8px #ef4444}
-      .warn-dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#f59e0b;margin-right:8px;box-shadow:0 0 8px #f59e0b}
+      .app-header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:20px;border-radius:14px;color:#fff;margin-bottom:18px}
+      .metric-card{background:#fff;padding:14px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+      .chip{display:inline-block;padding:4px 10px;border-radius:999px;background:#eef2ff;border:1px solid #c7d2fe}
+      .ok{color:#10b981}.bad{color:#ef4444}
       .latex-box{font-size:1.05em;padding:10px;border-radius:8px;background:#f8fafc;border:1px solid #e5e7eb;overflow-x:auto}
-      .connection-status{padding:8px 12px;border-radius:8px;margin-bottom:12px;font-size:0.9em}
-      .connection-ok{background:#f0fdf4;border:1px solid #10b981;color:#065f46}
-      .connection-error{background:#fef2f2;border:1px solid #ef4444;color:#991b1b}
-      .connection-demo{background:#fef3c7;border:1px solid #f59e0b;color:#92400e}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# ---------- Session State ----------
-
-def init_session_state():
-    """Initialize session state with defaults"""
+# ---------- Session ----------
+def _init_state():
     ss = st.session_state
-    ss.setdefault("api_status", None)
-    ss.setdefault("api_url", API_BASE_URL)
-    ss.setdefault("api_reachable", False)
-    ss.setdefault("using_demo", False)
-    ss.setdefault("connection_attempts", 0)
-    ss.setdefault("last_health_check", None)
+    ss.setdefault("resolved_prefix", None)  # "", "/api/v1", etc
+    ss.setdefault("api_status", {"status": "unknown"})
     ss.setdefault("available_generators", [])
     ss.setdefault("available_functions", [])
     ss.setdefault("generated_odes", [])
-    ss.setdefault("batch_dataset", [])
-    ss.setdefault("current_dataset", None)
+    ss.setdefault("batch_cache", [])
     ss.setdefault("available_datasets", [])
     ss.setdefault("available_models", [])
-    ss.setdefault("ml_generated_odes", [])
-    ss.setdefault("api_endpoints", {})
+_init_state()
 
-init_session_state()
+# ---------- API Client (prefix-agnostic) ----------
 
-# ---------- Demo Data ----------
+class API:
+    """
+    A tiny client that:
+      1) Tries to discover the right prefix from GET "/" (if provided).
+      2) Falls back to probing both "" and "/api/v1" on first call.
+      3) Caches the working prefix in session.
+    """
 
-DEMO_GENERATORS = ["L1", "L2", "L3", "L4", "N1", "N2", "N3", "N4", "N5", "N6", "N7"]
-DEMO_FUNCTIONS = [
-    "sine", "cosine", "tangent_safe", "exponential", "exp_scaled",
-    "quadratic", "cubic", "sinh", "cosh", "tanh", "log_safe"
-]
+    def __init__(self, base: str, key: str, initial_prefix: Optional[str] = RAW_PREFIX):
+        self.base = base.rstrip("/")
+        self.headers = {"X-API-Key": key, "Content-Type": "application/json"}
+        p = (initial_prefix or "").strip()
+        if p and not p.startswith("/"):
+            p = "/" + p
+        self.prefix = p or (st.session_state.get("resolved_prefix") or "")
+        self._probed = False
 
-def get_demo_ode():
-    """Generate a demo ODE response"""
-    return {
-        "id": str(uuid.uuid4()),
-        "ode": "y'' + y = π·sin(x)",
-        "solution": "π·sin(x)",
-        "verified": True,
-        "complexity": 50,
-        "generator": "L1",
-        "function": "sine",
-        "parameters": {"alpha": 1.0, "beta": 1.0, "M": 0.0},
-        "timestamp": datetime.now().isoformat(),
-        "properties": {
-            "generation_time_ms": 150,
-            "verification_confidence": 0.99
-        }
-    }
+    # ---- helpers
+    def _join(self, prefix: str, path: str) -> str:
+        return f"{self.base}{prefix}{path}"
 
-# ---------- Enhanced API Client ----------
+    def _maybe_discover(self):
+        if self._probed:
+            return
+        self._probed = True
+        # 1) Try root discovery
+        try:
+            r = requests.get(self._join("", "/"), timeout=6)
+            if r.ok:
+                data = {}
+                try:
+                    data = r.json()
+                except Exception:
+                    data = {}
+                # Heuristic: if the discovery advertises "/api/v1/generate", assume "/api/v1"
+                hinted = ""
+                try:
+                    api_map = (data or {}).get("endpoints", {}).get("api", {})
+                    # flatten all string values and look for "/api/v1/"
+                    values = []
+                    for v in api_map.values():
+                        if isinstance(v, str):
+                            values.append(v)
+                        elif isinstance(v, dict):
+                            values.extend([x for x in v.values() if isinstance(x, str)])
+                    if any("/api/v1/" in s for s in values):
+                        hinted = "/api/v1"
+                except Exception:
+                    pass
+                if hinted and not self.prefix:
+                    self.prefix = hinted
+        except Exception:
+            pass
+        # 2) If user passed API_PREFIX, keep it. Otherwise defer to first call fallback.
 
-class APIClient:
-    def __init__(self, base_url: str, api_key: str):
-        self.base_url = base_url.rstrip("/")
-        self.api_key = api_key
-        self.headers = {
-            "X-API-Key": api_key,
-            "Content-Type": "application/json"
-        }
-        self.session = requests.Session()
-        self.session.headers.update(self.headers)
-        
-    def _try_endpoints(self, path: str, method: str = "GET", 
-                       json_body: Any = None, timeout: int = REQUEST_TIMEOUT) -> Tuple[Optional[Any], Optional[str], str]:
-        """Try multiple endpoint variations to find the working one"""
-        # Possible endpoint patterns - order matters!
-        variations = []
-        
-        # For health/metrics, try root first
-        if path in ["/health", "/metrics", "/"]:
-            variations.append(f"{self.base_url}{path}")
+    def _request(self, method: str, path: str, *, json_body: Any | None = None, timeout: int = REQUEST_TIMEOUT):
+        self._maybe_discover()
+
+        # Try with current prefix first
+        prefixes_to_try = [self.prefix]
+        # If not set or fails with 404, we’ll try the other one
+        if self.prefix == "":
+            prefixes_to_try.append("/api/v1")
+        elif self.prefix == "/api/v1":
+            prefixes_to_try.append("")
         else:
-            # Try these patterns in order
-            variations.extend([
-                f"{self.base_url}{path}",  # Direct path (no prefix)
-                f"{self.base_url}/api/v1{path}",  # With /api/v1 prefix
-                f"{self.base_url}/api{path}",  # With /api prefix
-                f"{self.base_url}/v1{path}",  # With /v1 prefix
-            ])
-        
-        last_error = None
-        for url in variations:
+            # Odd custom prefix? also try without and with /api/v1 as last resorts
+            prefixes_to_try.extend(["", "/api/v1"])
+
+        last_err = None
+        for pfx in dict.fromkeys(prefixes_to_try):  # de-dup while keeping order
+            url = self._join(pfx, path)
             try:
-                if method == "GET":
-                    r = self.session.get(url, timeout=timeout)
-                elif method == "POST":
-                    r = self.session.post(url, json=json_body, timeout=timeout)
-                else:
-                    r = self.session.request(method, url, json=json_body, timeout=timeout)
-                
-                if r.status_code < 400:
-                    # Success! Store this endpoint pattern
-                    if path not in st.session_state.api_endpoints:
-                        st.session_state.api_endpoints[path] = url
-                    
-                    if path == "/metrics":
-                        return r.text, None, url
-                    
-                    try:
-                        return r.json() if r.text.strip() else {}, None, url
-                    except:
-                        return r.text, None, url
-                        
-                last_error = f"HTTP {r.status_code}: {r.text[:200]}"
-                
-            except requests.exceptions.ConnectionError:
-                last_error = "Connection refused"
-            except requests.exceptions.Timeout:
-                last_error = "Request timeout"
+                r = requests.request(method, url, headers=self.headers, json=json_body, timeout=timeout)
             except Exception as e:
-                last_error = str(e)
-        
-        return None, last_error, ""
-    
-    def _request(self, method: str, path: str, json_body: Any = None, 
-                 timeout: int = REQUEST_TIMEOUT) -> Tuple[Optional[Any], Optional[str]]:
-        """Make a request, using cached endpoint if available"""
-        # Check if we have a cached working endpoint
-        if path in st.session_state.api_endpoints:
-            url = st.session_state.api_endpoints[path]
+                last_err = f"{method} {url} -> {e}"
+                continue
+
+            if r.status_code == 404:
+                last_err = f"{method} {url} -> HTTP 404"
+                continue
+            if r.status_code >= 400:
+                return None, f"{method} {url} -> HTTP {r.status_code}: {r.text[:300]}"
+
+            # Success -> adopt this prefix permanently
+            if pfx != self.prefix:
+                self.prefix = pfx
+                st.session_state.resolved_prefix = pfx
+
+            if path.endswith("/metrics"):
+                return r.text, None
             try:
-                if method == "GET":
-                    r = self.session.get(url, timeout=timeout)
-                elif method == "POST":
-                    r = self.session.post(url, json=json_body, timeout=timeout)
-                else:
-                    r = self.session.request(method, url, json=json_body, timeout=timeout)
-                
-                if r.status_code < 400:
-                    if path == "/metrics":
-                        return r.text, None
-                    return r.json() if r.text.strip() else {}, None
-            except:
-                # Cached endpoint failed, remove it
-                del st.session_state.api_endpoints[path]
-        
-        # Try to find working endpoint
-        data, err, _ = self._try_endpoints(path, method, json_body, timeout)
-        return data, err
-    
+                return (r.json() if r.text.strip() else None), None
+            except Exception:
+                return None, "Non-JSON response"
+
+        return None, last_err or "All attempts failed"
+
+    # ---- normalized endpoints (UNPREFIXED PATHS) ----
     def health(self) -> Dict[str, Any]:
-        """Check API health with automatic endpoint discovery"""
-        data, err, url = self._try_endpoints("/health", timeout=5)
-        
-        if data:
-            return {
-                "status": data.get("status", "unknown"),
-                "ml_enabled": data.get("ml_enabled", False),
-                "redis_enabled": data.get("redis_enabled", False),
-                "generators": data.get("generators", 0),
-                "functions": data.get("functions", 0),
-                "working_url": url
-            }
-        
-        return {
-            "status": "error",
-            "error": err or "Could not connect to API",
-            "working_url": None
-        }
-    
+        data, err = self._request("GET", "/health", timeout=8)
+        return {"status": "error", "error": err} if err else (data or {"status": "unknown"})
+
     def generators(self) -> List[str]:
-        """Get available generators"""
-        data, _ = self._request("GET", "/generators")
-        
-        if isinstance(data, dict):
-            # Handle various response formats
-            if "all" in data:
-                return data["all"]
-            elif "linear" in data and "nonlinear" in data:
-                return data["linear"] + data["nonlinear"]
-            elif "generators" in data:
-                return data["generators"]
-        elif isinstance(data, list):
-            return data
-        
-        return []
-    
+        data, err = self._request("GET", "/generators")
+        if err or data is None:
+            return []
+        try:
+            if isinstance(data, list): return [str(x) for x in data]
+            if "all" in data: return [str(x) for x in data["all"]]
+            if "generators" in data: return [str(x) for x in data["generators"]]
+            lin = data.get("linear", []) if isinstance(data, dict) else []
+            non = data.get("nonlinear", []) if isinstance(data, dict) else []
+            return [*map(str, lin), *map(str, non)]
+        except Exception:
+            return []
+
     def functions(self) -> List[str]:
-        """Get available functions"""
-        data, _ = self._request("GET", "/functions")
-        
-        if isinstance(data, dict):
-            if "functions" in data:
-                return data["functions"]
-            elif "all" in data:
-                return data["all"]
-        elif isinstance(data, list):
-            return data
-        
+        data, err = self._request("GET", "/functions")
+        if err or data is None:
+            return []
+        try:
+            if isinstance(data, list): return [str(x) for x in data]
+            if "functions" in data: return [str(x) for x in data["functions"]]
+            if "data" in data and "functions" in data["data"]: return [str(x) for x in data["data"]["functions"]]
+            if "items" in data: return [str(x) for x in data["items"]]
+        except Exception:
+            pass
         return []
-    
-    def generate(self, **kwargs) -> Optional[Dict[str, Any]]:
-        """Generate ODEs"""
-        data, err = self._request("POST", "/generate", json_body=kwargs)
+
+    def generate(self, *, generator: str, function: str, parameters: Dict[str, Any], count: int = 1, verify: bool = True):
+        body = {"generator": generator, "function": function, "parameters": parameters, "count": count, "verify": verify}
+        data, err = self._request("POST", "/generate", json_body=body)
         if err:
-            st.error(f"Generation failed: {err}")
+            st.error(f"Generate failed: {err}")
             return None
         return data
-    
-    def batch_generate(self, **kwargs) -> Optional[Dict[str, Any]]:
-        """Batch generate ODEs"""
-        data, err = self._request("POST", "/batch_generate", json_body=kwargs)
+
+    def batch_generate(self, *, generators: List[str], functions: List[str], samples_per_combination: int, parameters: Optional[Dict[str, Any]] = None, verify: bool = True, dataset_name: Optional[str] = None):
+        body: Dict[str, Any] = {"generators": generators, "functions": functions, "samples_per_combination": samples_per_combination, "verify": verify}
+        if parameters: body["parameters"] = parameters
+        if dataset_name: body["dataset_name"] = dataset_name
+        data, err = self._request("POST", "/batch_generate", json_body=body)
         if err:
-            st.error(f"Batch generation failed: {err}")
+            st.error(f"Batch generate failed: {err}")
             return None
         return data
-    
-    def verify(self, **kwargs) -> Optional[Dict[str, Any]]:
-        """Verify ODE solution"""
-        data, err = self._request("POST", "/verify", json_body=kwargs)
+
+    def verify(self, *, ode: str, solution: str, method: str = "substitution"):
+        body = {"ode": ode, "solution": solution, "method": method}
+        data, err = self._request("POST", "/verify", json_body=body)
         if err:
-            st.error(f"Verification failed: {err}")
+            st.error(f"Verify failed: {err}")
             return None
         return data
-    
-    def datasets(self) -> Dict[str, Any]:
-        """List datasets"""
+
+    def datasets(self):
         data, _ = self._request("GET", "/datasets")
         return data or {"datasets": [], "count": 0}
-    
-    def create_dataset(self, **kwargs) -> Optional[Dict[str, Any]]:
-        """Create dataset"""
-        data, err = self._request("POST", "/datasets/create", json_body=kwargs)
+
+    def create_dataset(self, *, odes: List[Dict[str, Any]], dataset_name: Optional[str] = None):
+        body = {"odes": odes, "dataset_name": dataset_name}
+        data, err = self._request("POST", "/datasets/create", json_body=body)
         if err:
-            st.error(f"Dataset creation failed: {err}")
+            st.error(f"Create dataset failed: {err}")
             return None
         return data
-    
-    def models(self) -> Dict[str, Any]:
-        """List ML models"""
+
+    def models(self):
         data, _ = self._request("GET", "/models")
         return data or {"models": [], "count": 0}
-    
-    def stats(self) -> Dict[str, Any]:
-        """Get statistics"""
+
+    def stats(self):
         data, _ = self._request("GET", "/stats")
         return data or {}
-    
+
     def metrics(self) -> str:
-        """Get Prometheus metrics"""
         data, _ = self._request("GET", "/metrics")
         return data or ""
-    
-    def job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
-        """Check job status"""
+
+    def job_status(self, job_id: str):
         data, err = self._request("GET", f"/jobs/{job_id}")
         if err:
-            return None
-        return data
-    
-    def ml_train(self, **kwargs) -> Optional[Dict[str, Any]]:
-        """Start ML training"""
-        data, err = self._request("POST", "/ml/train", json_body=kwargs)
-        if err:
-            st.error(f"ML training failed: {err}")
-            return None
-        return data
-    
-    def ml_generate(self, **kwargs) -> Optional[Dict[str, Any]]:
-        """ML generation"""
-        data, err = self._request("POST", "/ml/generate", json_body=kwargs)
-        if err:
-            st.error(f"ML generation failed: {err}")
+            st.error(f"Job status failed: {err}")
             return None
         return data
 
-# Initialize API client
-api = APIClient(API_BASE_URL, API_KEY)
 
-# ---------- Connection Management ----------
+api = API(API_BASE_URL, API_KEY, initial_prefix=RAW_PREFIX)
 
-def check_api_connection() -> Tuple[bool, str]:
-    """Check API connection and return status"""
-    try:
-        # First, try to reach the root endpoint to see if API is up
-        root_response, root_error, root_url = api._try_endpoints("/", timeout=5)
-        
-        if root_response and isinstance(root_response, dict):
-            # API is responding, check for available endpoints
-            endpoints = root_response.get("endpoints", {})
-            if endpoints:
-                st.session_state.api_status = {
-                    "status": "connected",
-                    "root_response": root_response,
-                    "endpoints": endpoints
-                }
-        
-        # Now try health endpoint
-        health = api.health()
-        
-        if health.get("status") in ["healthy", "ok", "operational"]:
-            st.session_state.api_reachable = True
-            st.session_state.api_status = health
-            st.session_state.last_health_check = time.time()
-            
-            # Try to get generators and functions
-            gens = api.generators()
-            funcs = api.functions()
-            
-            if gens and funcs:
-                st.session_state.available_generators = gens
-                st.session_state.available_functions = funcs
-                st.session_state.using_demo = False
-                return True, f"API connected successfully ({len(gens)} generators, {len(funcs)} functions)"
-            elif USE_DEMO:
-                # API is up but no generators/functions, use demo
-                st.session_state.available_generators = DEMO_GENERATORS
-                st.session_state.available_functions = DEMO_FUNCTIONS
-                st.session_state.using_demo = True
-                return True, "API connected but using demo data (no generators/functions from API)"
-            else:
-                return False, "API connected but no generators/functions available"
-        else:
-            # Check if we at least got a response from root
-            if root_response:
-                error_msg = f"API responding but health check failed: {health.get('error', 'unknown')}"
-            else:
-                error_msg = health.get("error", "Cannot reach API")
-            
-            if USE_DEMO:
-                st.session_state.available_generators = DEMO_GENERATORS
-                st.session_state.available_functions = DEMO_FUNCTIONS
-                st.session_state.using_demo = True
-                st.session_state.api_reachable = False
-                return True, f"Using demo mode ({error_msg})"
-            else:
-                st.session_state.api_reachable = False
-                return False, error_msg
-                
-    except Exception as e:
-        if USE_DEMO:
-            st.session_state.available_generators = DEMO_GENERATORS
-            st.session_state.available_functions = DEMO_FUNCTIONS
-            st.session_state.using_demo = True
-            st.session_state.api_reachable = False
-            return True, f"Using demo mode (Connection error: {str(e)[:100]})"
-        else:
-            st.session_state.api_reachable = False
-            return False, f"Cannot connect to API: {str(e)}"
+# ---------- Demo fallback ----------
+DEMO_GENERATORS = ["L1", "L2", "L3", "L4", "N1", "N2", "N3", "N4", "N5", "N6", "N7"]
+DEMO_FUNCTIONS  = ["sine", "cosine", "tangent_safe", "exponential", "exp_scaled", "quadratic", "cubic", "sinh", "cosh", "tanh", "log_safe"]
 
-def display_connection_status():
-    """Display connection status banner"""
-    if st.session_state.using_demo:
-        st.markdown(
-            f"""<div class='connection-status connection-demo'>
-            <span class='warn-dot'></span>
-            <b>Demo Mode</b> - API unavailable, using sample data
-            </div>""",
-            unsafe_allow_html=True
-        )
-    elif st.session_state.api_reachable:
-        st.markdown(
-            f"""<div class='connection-status connection-ok'>
-            <span class='ok-dot'></span>
-            <b>Connected</b> - {st.session_state.api_url}
-            </div>""",
-            unsafe_allow_html=True
-        )
-    else:
-        st.markdown(
-            f"""<div class='connection-status connection-error'>
-            <span class='bad-dot'></span>
-            <b>Disconnected</b> - Cannot reach API
-            </div>""",
-            unsafe_allow_html=True
-        )
+# ---------- Cache wrappers ----------
+@st.cache_data(ttl=60)
+def cached_generators() -> List[str]: return api.generators()
 
-def ensure_connection():
-    """Ensure we have a working connection or demo mode"""
-    # Check if we need to refresh connection status
-    if st.session_state.last_health_check is None or \
-       time.time() - st.session_state.last_health_check > 30:
-        
-        success, message = check_api_connection()
-        
-        if not success and not USE_DEMO:
-            st.error(f"""
-            ### 🔴 API Connection Failed
-            
-            {message}
-            
-            **Troubleshooting:**
-            1. Check if your API server is running
-            2. Verify the API_BASE_URL environment variable
-            3. Current URL: `{st.session_state.api_url}`
-            4. Enable demo mode with USE_DEMO=1
-            
-            **For Railway deployment:**
-            - Check your service is deployed and running
-            - Verify environment variables are set correctly
-            - Check service logs for errors
-            """)
-            st.stop()
+@st.cache_data(ttl=60)
+def cached_functions() -> List[str]: return api.functions()
 
-# ---------- Helper Functions ----------
+@st.cache_data(ttl=30)
+def cached_stats() -> Dict[str, Any]: return api.stats()
 
-import uuid  # Add this import at the top
-
+# ---------- Helpers ----------
 def header():
-    st.markdown(
-        """
-        <div class="app-header">
-          <h2 style="margin:0">🔬 ODE Master Generator</h2>
-          <div style="opacity:.9">Generate, verify, and analyze ODEs — end to end.</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown("""<div class="app-header"><h2 style="margin:0">🔬 ODE Master Generator</h2>
+    <div style="opacity:.9">Generate, verify, and analyze ODEs — end to end.</div></div>""", unsafe_allow_html=True)
 
-def render_equation_block(title: str, expr: str):
+def chip(ok: bool) -> str:
+    return f"<span class='chip {'ok' if ok else 'bad'}'>{'API Online' if ok else 'API Offline'}</span>"
+
+def probe_and_load():
+    if st.session_state.api_status.get("status") == "unknown":
+        st.session_state.api_status = api.health()
+    gens = cached_generators()
+    funcs = cached_functions()
+    if (not gens or not funcs) and USE_DEMO:
+        gens = gens or DEMO_GENERATORS
+        funcs = funcs or DEMO_FUNCTIONS
+    st.session_state.available_generators = gens
+    st.session_state.available_functions = funcs
+
+def render_block(title: str, expr: str):
     st.markdown(f"**{title}**")
     st.markdown(f"<div class='latex-box'>{expr}</div>", unsafe_allow_html=True)
 
-def params_controls(generator: str, key_prefix: str = "") -> Dict[str, Any]:
-    col1, col2 = st.columns(2)
-    params: Dict[str, Any] = {}
-    with col1:
-        params["alpha"] = st.slider("α (alpha)", -2.0, 2.0, 1.0, 0.1, key=f"{key_prefix}_alpha")
-        params["beta"] = st.slider("β (beta)", 0.1, 3.0, 1.0, 0.1, key=f"{key_prefix}_beta")
-    with col2:
-        params["M"] = st.slider("M", -1.0, 1.0, 0.0, 0.1, key=f"{key_prefix}_M")
-        if generator.startswith("N"):
-            params["q"] = st.slider("q (power)", 2, 5, 2, key=f"{key_prefix}_q")
-            if generator in {"N2", "N3", "N6", "N7"}:
-                params["v"] = st.slider("v (power)", 2, 5, 3, key=f"{key_prefix}_v")
-        if generator in {"L4", "N6"}:
-            params["a"] = st.slider("a (pantograph)", 2.0, 5.0, 2.0, 0.5, key=f"{key_prefix}_a")
-    return params
+def plot_solution(expr: str, x_range=(-5.0, 5.0), params: Optional[Dict[str, Any]] = None):
+    if not sp:
+        st.info("Sympy not available in this runtime.")
+        return None
+    try:
+        x = sp.Symbol("x")
+        e = sp.sympify(expr)
+        if params:
+            for k, v in params.items():
+                try: e = e.subs(sp.Symbol(str(k)), v)
+                except Exception: pass
+        f = sp.lambdify(x, e, "numpy")
+        xs = np.linspace(x_range[0], x_range[1], 600)
+        ys = np.real(np.nan_to_num(f(xs), nan=np.nan))
+        fig = go.Figure(go.Scatter(x=xs, y=ys, mode="lines", name="y(x)"))
+        fig.update_layout(template="plotly_white", height=420, title="Solution plot", xaxis_title="x", yaxis_title="y(x)")
+        return fig
+    except Exception as e:
+        st.info(f"Plotting skipped: {e}")
+        return None
 
-def wait_for_job(job_id: str, max_secs: int = 900, poll: float = 1.5) -> Optional[Dict[str, Any]]:
-    """Wait for job completion with progress display"""
-    if st.session_state.using_demo:
-        # Simulate job completion in demo mode
-        time.sleep(1)
-        return {
-            "status": "completed",
-            "results": [get_demo_ode() for _ in range(3)]
-        }
-    
-    start = time.time()
-    prog = st.progress(0)
-    info = st.empty()
-    
+def wait_for_job(job_id: str, *, max_secs: int = 900, poll: float = 1.5) -> Optional[Dict[str, Any]]:
+    start = time.time(); bar = st.progress(0); info = st.empty()
     while time.time() - start < max_secs:
         js = api.job_status(job_id)
-        if not js:
-            time.sleep(poll)
-            continue
-            
-        status = js.get("status", "unknown")
-        progress = int(js.get("progress", 0))
-        prog.progress(min(progress, 100))
-        
-        meta = js.get("metadata", {})
-        if meta:
-            if "current_epoch" in meta:
-                info.text(f"{status} — epoch {meta.get('current_epoch')}/{meta.get('total_epochs', '?')}")
-            elif "current" in meta and "total" in meta:
-                info.text(f"{status} — {meta.get('current')}/{meta.get('total')}")
-            else:
-                info.text(status)
-        
-        if status == "completed":
-            prog.progress(100)
-            return js
-        if status == "failed":
-            st.error(js.get("error", "Job failed"))
-            return None
-            
+        if js:
+            status = js.get("status", "unknown")
+            bar.progress(int(js.get("progress", 0)))
+            meta = js.get("metadata", {})
+            if meta:
+                if "current_epoch" in meta: info.text(f"{status} — epoch {meta['current_epoch']}/{meta.get('total_epochs','?')}")
+                elif "current" in meta and "total" in meta: info.text(f"{status} — {meta['current']}/{meta['total']}")
+                else: info.text(status)
+            if status == "completed": bar.progress(100); return js
+            if status == "failed": st.error(js.get("error", "Job failed")); return None
         time.sleep(poll)
-    
     st.error("Job timed out")
     return None
 
-def download_jsonl(data: List[Dict[str, Any]], filename: str = "dataset.jsonl"):
-    payload = "\n".join(json.dumps(o) for o in data)
+def download_jsonl(rows: List[Dict[str, Any]], name="dataset.jsonl"):
+    payload = "\n".join(json.dumps(o) for o in rows)
     b64 = base64.b64encode(payload.encode()).decode()
-    st.markdown(
-        f"<a download='{filename}' href='data:application/json;base64,{b64}'>📥 Download {filename}</a>",
-        unsafe_allow_html=True
-    )
+    st.markdown(f"<a download='{name}' href='data:application/json;base64,{b64}'>📥 Download {name}</a>", unsafe_allow_html=True)
 
-# ---------- Page Functions ----------
-
+# ---------- Pages ----------
 def page_dashboard():
     st.title("Dashboard")
-    ensure_connection()
-    display_connection_status()
-    
-    # Metrics
-    colA, colB, colC, colD = st.columns(4)
-    
-    with colA:
-        if st.session_state.api_reachable:
-            st.metric("API Status", "🟢 Online")
-        elif st.session_state.using_demo:
-            st.metric("API Status", "🟡 Demo")
-        else:
-            st.metric("API Status", "🔴 Offline")
-    
-    stats = api.stats() if st.session_state.api_reachable else {}
-    
-    with colB:
-        st.metric("Generated (24h)", f"{stats.get('total_generated_24h', 0):,}")
-    with colC:
-        st.metric("Verification Rate", f"{stats.get('verification_success_rate', 0):.1%}")
-    with colD:
-        st.metric("Active Jobs", stats.get('active_jobs', 0))
-    
-    # Recent ODEs
+    probe_and_load()
+    online = (st.session_state.api_status or {}).get("status") in {"healthy", "ok", "operational"}
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: st.markdown(f"<div class='metric-card'>{chip(online)}</div>", unsafe_allow_html=True)
+    stats = cached_stats()
+    with c2: st.metric("Generated (24h)", f"{stats.get('total_generated_24h', 0):,}")
+    with c3: st.metric("Verification Rate", f"{stats.get('verification_success_rate', 0):.1%}")
+    with c4: st.metric("Active Jobs", stats.get("active_jobs", 0))
     st.subheader("Recent ODEs")
     if not st.session_state.generated_odes:
         st.info("No recent ODEs yet. Try Quick Generate.")
     else:
-        for i, ode in enumerate(st.session_state.generated_odes[-5:][::-1], 1):
-            with st.expander(f"Recent {i}: {ode.get('generator', '?')} × {ode.get('function', '?')}"):
-                render_equation_block("ODE", ode.get("ode", ""))
-                if ode.get("solution"):
-                    render_equation_block("Solution", f"y(x) = {ode['solution']}")
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Complexity", ode.get("complexity", "N/A"))
-                c2.metric("Verified", "✅" if ode.get("verified") else "❌")
-                c3.metric("Gen Time", f"{ode.get('properties', {}).get('generation_time_ms', 0):.0f} ms")
-    
-    # Resources
-    st.subheader("Available Resources")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Generators", len(st.session_state.available_generators))
-    c2.metric("Functions", len(st.session_state.available_functions))
-    c3.metric("Datasets", len(st.session_state.available_datasets))
-    c4.metric("Models", len(st.session_state.available_models))
-    
-    if st.session_state.using_demo:
-        st.info("📌 **Demo Mode Active** - Limited functionality available. Connect to an API server for full features.")
+        for i, ode in enumerate(st.session_state.generated_odes[-6:][::-1], 1):
+            with st.expander(f"{i}. {ode.get('generator','?')} × {ode.get('function','?')} — {'✅' if ode.get('verified') else '❔'}"):
+                render_block("ODE", ode.get("ode", ode.get("ode_symbolic","")))
+                sol = ode.get("solution") or ode.get("solution_symbolic")
+                if sol: render_block("Solution", f"y(x) = {sol}")
+
+def params_controls(generator: str, key_prefix: str = "") -> Dict[str, Any]:
+    col1, col2 = st.columns(2); p: Dict[str, Any] = {}
+    with col1:
+        p["alpha"] = st.slider("α (alpha)", -2.0, 2.0, 1.0, 0.1, key=f"{key_prefix}_alpha")
+        p["beta"]  = st.slider("β (beta)", 0.1, 3.0, 1.0, 0.1, key=f"{key_prefix}_beta")
+    with col2:
+        p["M"] = st.slider("M", -1.0, 1.0, 0.0, 0.1, key=f"{key_prefix}_M")
+        if generator.startswith("N"):
+            p["q"] = st.slider("q (power)", 2, 5, 2, key=f"{key_prefix}_q")
+            if generator in {"N2", "N3", "N6", "N7"}:
+                p["v"] = st.slider("v (power)", 2, 5, 3, key=f"{key_prefix}_v")
+        if generator in {"L4", "N6"}:
+            p["a"] = st.slider("a (pantograph)", 2.0, 5.0, 2.0, 0.5, key=f"{key_prefix}_a")
+    return p
 
 def page_quick_generate():
     st.title("⚡ Quick Generate")
-    ensure_connection()
-    display_connection_status()
-    
-    gens = st.session_state.available_generators
-    funcs = st.session_state.available_functions
-    
+    probe_and_load()
+    gens, funcs = st.session_state.available_generators, st.session_state.available_functions
     if not gens or not funcs:
-        st.error("""
-        ### No generators or functions available
-        
-        Please check:
-        1. API server is running and accessible
-        2. Core modules are properly installed
-        3. Or enable demo mode with USE_DEMO=1
-        """)
+        st.error("No generators/functions available. Check API or enable USE_DEMO=1.")
         return
-    
     c1, c2 = st.columns(2)
-    with c1:
-        generator = st.selectbox("Generator", gens, index=0)
-    with c2:
-        function = st.selectbox("Function", funcs, index=0)
-    
+    with c1: generator = st.selectbox("Generator", gens, index=0)
+    with c2: function  = st.selectbox("Function", funcs, index=min(0, len(funcs)-1))
     st.markdown("### Parameters")
     params = params_controls(generator, key_prefix="quick")
-    
-    with st.expander("Advanced Options"):
+    with st.expander("Advanced"):
         colA, colB = st.columns(2)
         with colA:
             verify = st.checkbox("Verify solution", True)
-            count = st.number_input("Number of ODEs", 1, 10, 1)
+            count  = st.number_input("Number of ODEs", 1, 10, 1)
         with colB:
-            show_plot = st.checkbox("Plot solution (if available)", False)
-            x_range = st.slider("Plot range", -10.0, 10.0, (-5.0, 5.0))
-    
+            show_plot = st.checkbox("Plot solution (if available)", True)
+            x_range  = st.slider("Plot range", -10.0, 10.0, (-5.0, 5.0))
     if st.button("🚀 Generate", type="primary"):
-        if st.session_state.using_demo:
-            # Demo mode generation
-            st.success("Generated (Demo Mode)")
-            demo_odes = [get_demo_ode() for _ in range(count)]
-            for i, ode in enumerate(demo_odes, 1):
+        start = api.generate(generator=generator, function=function, parameters=params, count=count, verify=verify)
+        if not start or "job_id" not in start:
+            st.error("Failed to start job"); return
+        js = wait_for_job(start["job_id"], max_secs=600)
+        if js and js.get("results"):
+            st.success(f"Generated {len(js['results'])} ODE(s)")
+            for ode in js["results"]:
                 st.session_state.generated_odes.append(ode)
                 st.markdown("---")
-                st.subheader(f"ODE {i}")
-                render_equation_block("Generated ODE", ode["ode"])
-                render_equation_block("Solution", f"y(x) = {ode['solution']}")
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Complexity", ode["complexity"])
-                c2.metric("Verified", "✅" if ode["verified"] else "❌")
-                c3.metric("Time", f"{ode['properties']['generation_time_ms']:.0f} ms")
+                render_block("Generated ODE", ode.get("ode",""))
+                if ode.get("solution"): render_block("Solution", f"y(x) = {ode['solution']}")
+                if show_plot and ode.get("solution"):
+                    fig = plot_solution(ode["solution"], x_range, params)
+                    if fig: st.plotly_chart(fig, use_container_width=True)
         else:
-            # Real API generation
-            with st.status("Generating...", expanded=True) as s:
-                resp = api.generate(
-                    generator=generator,
-                    function=function,
-                    parameters=params,
-                    count=count,
-                    verify=verify
-                )
-                
-                if not resp or "job_id" not in resp:
-                    s.update(label="Failed to start job", state="error")
-                    return
-                
-                s.update(label=f"Job {resp['job_id']} started")
-            
-            js = wait_for_job(resp["job_id"])
-            
-            if js and js.get("results"):
-                st.success(f"Generated {len(js['results'])} ODE(s)")
-                
-                for i, ode in enumerate(js["results"], 1):
-                    st.session_state.generated_odes.append(ode)
-                    st.markdown("---")
-                    st.subheader(f"ODE {i}")
-                    render_equation_block("Generated ODE", ode.get("ode", ""))
-                    if ode.get("solution"):
-                        render_equation_block("Solution", f"y(x) = {ode['solution']}")
-                    
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("Complexity", ode.get("complexity", "N/A"))
-                    c2.metric("Verified", "✅" if ode.get("verified") else "❌")
-                    c3.metric("Confidence", f"{ode.get('properties', {}).get('verification_confidence', 0):.2%}")
-                    c4.metric("Time", f"{ode.get('properties', {}).get('generation_time_ms', 0):.0f} ms")
-            else:
-                st.error("No results returned")
-    
-    # Export section
-    if st.session_state.generated_odes:
-        st.markdown("### Export")
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📥 Download all"):
-                download_jsonl(st.session_state.generated_odes, "generated_odes.jsonl")
-        with col2:
-            if st.button("🗑️ Clear cache"):
-                st.session_state.generated_odes = []
-                st.success("Cleared")
+            st.error("No results returned.")
 
-def page_tools():
-    st.title("🛠️ Tools & Diagnostics")
-    
-    st.subheader("🔌 Connection Diagnostics")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### Current Configuration")
-        st.code(f"""
-API URL: {st.session_state.api_url}
-API Key: {'*' * (len(API_KEY) - 4) + API_KEY[-4:] if len(API_KEY) > 4 else '****'}
-Demo Mode: {USE_DEMO}
-Timeout: {REQUEST_TIMEOUT}s
-        """)
-        
-        if st.button("🔄 Test Connection"):
-            with st.spinner("Testing connection..."):
-                success, message = check_api_connection()
-                if success:
-                    st.success(message)
-                else:
-                    st.error(message)
-    
-    with col2:
-        st.markdown("### API Endpoints Found")
-        if st.session_state.api_endpoints:
-            for path, url in st.session_state.api_endpoints.items():
-                st.code(f"{path} → {url}")
-        else:
-            st.info("No endpoints discovered yet")
-    
-    st.subheader("📊 API Status")
-    
-    if st.session_state.api_status:
-        st.json(st.session_state.api_status)
-    else:
-        st.info("No status data available")
-    
-    # Stats
-    if st.session_state.api_reachable:
-        st.subheader("📈 Statistics")
-        stats = api.stats()
-        if stats:
-            st.json(stats)
-    
-    # Session management
-    st.subheader("🧹 Session Management")
-    
-    c1, c2, c3 = st.columns(3)
-    
-    with c1:
-        if st.button("Clear ODEs Cache"):
-            st.session_state.generated_odes = []
-            st.session_state.batch_dataset = []
-            st.session_state.ml_generated_odes = []
-            st.success("Cleared ODE caches")
-    
-    with c2:
-        if st.button("Reset Connection"):
-            st.session_state.api_endpoints = {}
-            st.session_state.last_health_check = None
-            st.session_state.connection_attempts = 0
-            check_api_connection()
-            st.success("Connection reset")
-    
-    with c3:
-        if st.button("Full Reset"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.success("Session fully reset")
-            st.rerun()
-
-# Add placeholder functions for other pages
 def page_batch_generation():
     st.title("📦 Batch Generation")
-    ensure_connection()
-    display_connection_status()
-    
-    if st.session_state.using_demo:
-        st.warning("Batch generation is not available in demo mode")
+    probe_and_load()
+    gens, funcs = st.session_state.available_generators, st.session_state.available_functions
+    if not gens or not funcs:
+        st.error("No generators/functions available. Check API or enable USE_DEMO=1.")
         return
-    
-    st.info("Batch generation functionality - implement based on API availability")
+    left, right = st.columns(2)
+    with left:
+        linear    = [g for g in gens if g.startswith("L")]
+        nonlinear = [g for g in gens if g.startswith("N")]
+        st.markdown("**Linear Generators**")
+        sel_lin = st.multiselect("", linear, default=linear[:2] or linear)
+        st.markdown("**Nonlinear Generators**")
+        sel_non = st.multiselect(" ", nonlinear, default=nonlinear[:2] or nonlinear)
+        selected_g = sel_lin + sel_non
+    with right:
+        sel_funcs = st.multiselect("Functions", funcs, default=funcs[:5])
+    samples = st.slider("Samples per combination", 1, 20, 5)
+    total = len(selected_g) * len(sel_funcs) * samples
+    st.info(f"This will generate **{total:,}** ODEs")
+    st.markdown("### Parameter Ranges")
+    pr: Dict[str, Any] = {}
+    c1, c2 = st.columns(2)
+    with c1:
+        pr["alpha"] = st.multiselect("α", [-2.0,-1.5,-1.0,-0.5,0,0.5,1.0,1.5,2.0], default=[0,1.0])
+        pr["beta"]  = st.multiselect("β", [0.5,1.0,1.5,2.0,2.5,3.0], default=[1.0,2.0])
+        pr["M"]     = st.multiselect("M", [-1.0,-0.5,0,0.5,1.0], default=[0])
+    with c2:
+        if any(g.startswith("N") for g in selected_g):
+            pr["q"] = st.multiselect("q", [2,3,4,5], default=[2,3])
+            pr["v"] = st.multiselect("v", [2,3,4,5], default=[2,3])
+        if any(g in {"L4","N6"} for g in selected_g):
+            pr["a"] = st.multiselect("a", [2.0,2.5,3.0,3.5,4.0], default=[2.0])
+    st.markdown("### Advanced")
+    colA, colB = st.columns(2)
+    with colA:
+        verify = st.checkbox("Verify all", True)
+        save_ds = st.checkbox("Save as dataset", True)
+        ds_name = st.text_input("Dataset name", value=f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}") if save_ds else None
+    with colB:
+        export_fmt = st.selectbox("Export format (inline results)", ["JSONL","CSV"], index=0)
+    if st.button("🚀 Start Batch", type="primary"):
+        if not selected_g or not sel_funcs:
+            st.error("Pick at least one generator and one function."); return
+        out = api.batch_generate(generators=selected_g, functions=sel_funcs, samples_per_combination=samples, parameters=pr if any(pr.values()) else None, verify=verify, dataset_name=ds_name if save_ds else None)
+        if not out or "job_id" not in out:
+            st.error("Batch failed to start"); return
+        js = wait_for_job(out["job_id"], max_secs=3600, poll=3)
+        if not js or js.get("status") != "completed":
+            st.error("Batch did not complete."); return
+        results = js.get("results", {})
+        st.success(f"Done! Generated {results.get('total_generated', 0):,} ODEs")
+        if save_ds and results.get("dataset_info"):
+            ds = results["dataset_info"]
+            st.session_state.available_datasets.append(ds)
+            st.info(f"Saved dataset: {ds.get('name')} ({ds.get('size',0):,} ODEs)")
+        elif results.get("odes"):
+            st.session_state.batch_cache = results["odes"]
+            st.markdown("### Sample")
+            for i, ode in enumerate(results["odes"][:5], 1):
+                with st.expander(f"Sample {i}: {ode.get('generator_name','?')} × {ode.get('function_name','?')}"):
+                    render_block("ODE", ode.get("ode_symbolic",""))
+                    sol = ode.get("solution_symbolic")
+                    if sol: render_block("Solution", f"y(x) = {sol}")
+            if st.button("📥 Download"):
+                if export_fmt == "JSONL":
+                    download_jsonl(results["odes"], f"batch_odes_{len(results['odes'])}.jsonl")
+                else:
+                    df = pd.DataFrame(results["odes"]).to_csv(index=False)
+                    b64 = base64.b64encode(df.encode()).decode()
+                    st.markdown(f"<a download='batch_odes.csv' href='data:text/csv;base64,{b64}'>CSV</a>", unsafe_allow_html=True)
 
 def page_verify():
     st.title("✅ Verification")
-    ensure_connection()
-    display_connection_status()
-    
-    if st.session_state.using_demo:
-        st.warning("Verification is limited in demo mode")
-    
-    st.info("Verification functionality - implement based on API availability")
+    col1, col2 = st.columns(2)
+    with col1:
+        ode_txt = st.text_area("ODE (SymPy Eq(...))", "Eq(Derivative(y(x), x, 2) + y(x), pi*sin(x))", height=120)
+    with col2:
+        sol_txt = st.text_area("Proposed Solution", "pi*sin(x)", height=120)
+    method = st.selectbox("Method", ["substitution","numerical","checkodesol"])
+    if st.button("🔍 Verify", type="primary"):
+        res = api.verify(ode=ode_txt, solution=sol_txt, method=method)
+        if res:
+            if res.get("verified"): st.success(f"Verified ✅ — Confidence {res.get('confidence',0):.2%}")
+            else: st.error("Not verified ❌")
+            st.json(res)
 
 def page_datasets():
     st.title("📊 Datasets")
-    ensure_connection()
-    display_connection_status()
-    
-    if st.session_state.using_demo:
-        st.warning("Dataset management is not available in demo mode")
+    if st.button("🔄 Refresh"):
+        d = api.datasets()
+        st.session_state.available_datasets = d.get("datasets", [])
+        st.success("Refreshed.")
+    if not st.session_state.available_datasets:
+        st.info("No datasets yet. Use Batch Generation first.")
         return
-    
-    st.info("Dataset management - implement based on API availability")
+    for ds in st.session_state.available_datasets:
+        with st.expander(f"📁 {ds.get('name')} ({ds.get('size',0):,} ODEs)"):
+            st.write(f"Created: {ds.get('created_at','?')}")
+            st.write(f"Path: {ds.get('path','?')}")
 
 def page_ml_training():
     st.title("🤖 ML Training")
-    ensure_connection()
-    display_connection_status()
-    
-    if st.session_state.using_demo:
-        st.warning("ML features are not available in demo mode")
-        return
-    
-    st.info("ML training - implement based on API availability")
+    d = api.datasets(); datasets = [ds.get("name") for ds in d.get("datasets", [])]
+    if not datasets: st.warning("No datasets. Create one first."); return
+    col1, col2 = st.columns(2)
+    with col1:
+        ds_name = st.selectbox("Dataset", datasets, index=0)
+        epochs  = st.slider("Epochs", 10, 200, 50, 10)
+        model_type = st.selectbox("Model Type", ["pattern_net","transformer","vae"], index=0)
+    with col2:
+        batch_size = st.selectbox("Batch size", [16,32,64,128], index=1)
+        lr         = st.select_slider("Learning rate", [1e-5,1e-4,1e-3,1e-2], value=1e-3, format_func=lambda x: f"{x:.0e}")
+        early      = st.checkbox("Early stopping", True)
+    cfg = {"batch_size": batch_size, "learning_rate": lr, "early_stopping": early}
+    if model_type == "transformer":
+        c1, c2 = st.columns(2)
+        with c1: cfg["d_model"] = st.selectbox("d_model", [256,512,768], index=1); cfg["n_heads"] = st.selectbox("Heads", [4,8,12], index=1)
+        with c2: cfg["n_layers"] = st.slider("Layers", 2, 12, 6); cfg["dim_feedforward"] = st.selectbox("FF dim", [1024,2048,4096], index=1)
+    elif model_type == "vae":
+        c1, c2 = st.columns(2)
+        with c1: cfg["latent_dim"] = st.slider("Latent dim", 16, 256, 64, 16); cfg["hidden_dim"] = st.slider("Hidden dim", 128, 512, 256, 32)
+        with c2: cfg["beta"] = st.slider("KL β", 0.1, 10.0, 1.0, 0.1)
+    if st.button("🚀 Start Training", type="primary"):
+        body = {"dataset": ds_name, "model_type": model_type, "epochs": epochs, "batch_size": cfg.get("batch_size", 32), "learning_rate": cfg.get("learning_rate", 0.001), "early_stopping": cfg.get("early_stopping", True), "config": cfg}
+        data, err = api._request("POST", "/ml/train", json_body=body)
+        if err or not data or "job_id" not in data:
+            st.error(f"Could not start training: {err or 'no response'}"); return
+        js = wait_for_job(data["job_id"], max_secs=epochs*15, poll=2)
+        if js and js.get("status") == "completed": st.success("Training complete"); st.json(js.get("results", {}))
+        else: st.error("Training failed or timed out.")
 
 def page_ml_generate():
     st.title("🧪 ML Generation")
-    ensure_connection()
-    display_connection_status()
-    
-    if st.session_state.using_demo:
-        st.warning("ML generation is not available in demo mode")
-        return
-    
-    st.info("ML generation - implement based on API availability")
+    models = api.models().get("models", [])
+    if not models: st.warning("No models available. Train one first."); return
+    idx = st.selectbox("Model", list(range(len(models))), format_func=lambda i: models[i].get("name","model"))
+    model = models[idx]
+    st.info(f"{model.get('name')} — {model.get('metadata',{}).get('model_type','?')}")
+    col1, col2 = st.columns(2)
+    with col1:
+        n_samples = st.slider("# of ODEs", 5, 100, 20, 5)
+        temp      = st.slider("Temperature", 0.1, 2.0, 0.8, 0.1)
+    with col2:
+        target_gen = st.text_input("Target generator (optional)")
+        target_fun = st.text_input("Target function (optional)")
+    if st.button("🎨 Generate", type="primary"):
+        payload: Dict[str, Any] = {"model_path": model.get("path"), "n_samples": n_samples, "temperature": temp}
+        if target_gen: payload["generator"] = target_gen
+        if target_fun: payload["function"]  = target_fun
+        data, err = api._request("POST", "/ml/generate", json_body=payload)
+        if err or not data or "job_id" not in data:
+            st.error(f"Failed to start ML generation: {err or 'no response'}"); return
+        js = wait_for_job(data["job_id"], max_secs=900, poll=2)
+        if not js or js.get("status") != "completed":
+            st.error("ML generation did not complete."); return
+        results = js.get("results", {}); odes = results.get("odes", [])
+        st.success(f"Generated {len(odes)} ODEs"); st.write(pd.DataFrame(odes).head())
 
 def page_analysis():
     st.title("📈 Analysis")
-    ensure_connection()
-    display_connection_status()
-    
-    st.info("Analysis functionality - implement based on data availability")
+    data = st.session_state.generated_odes or st.session_state.batch_cache
+    if not data: st.warning("No data to analyze yet."); return
+    df = pd.DataFrame(data); st.write(df.head(3))
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total", len(df))
+    if "verified" in df: c2.metric("Verified", f"{int(df['verified'].sum())} ({df['verified'].mean()*100:.1f}%)")
+    if "generator" in df: c3.metric("Generators", df["generator"].nunique())
+    if "generator" in df:
+        st.subheader("By generator")
+        counts = df["generator"].value_counts()
+        st.plotly_chart(px.bar(x=counts.index, y=counts.values, labels={"x":"Generator","y":"Count"}), use_container_width=True)
+
+def page_tools():
+    st.title("🛠️ Tools & Status")
+    probe_and_load()
+    h = st.session_state.api_status or {}
+    resolved = st.session_state.get("resolved_prefix")
+    st.markdown(f"<div class='chip'>Resolved prefix: <b>{resolved if resolved is not None else '(undetermined)'}</b></div>", unsafe_allow_html=True)
+    st.subheader("Raw stats")
+    st.json(cached_stats())
+    st.subheader("Probe endpoints (first 800 chars)")
+    d1, e1 = api._request("GET", "/generators"); st.code((json.dumps(d1, indent=2) if isinstance(d1, dict) else str(d1))[:800])
+    d2, e2 = api._request("GET", "/functions");  st.code((json.dumps(d2, indent=2) if isinstance(d2, dict) else str(d2))[:800])
+    st.subheader("Prometheus metrics (first 2k chars)")
+    met = api.metrics()
+    st.text(met[:2000] + ("…" if len(met) > 2000 else ""))
 
 def page_docs():
     st.title("📚 Documentation")
-    
     st.markdown("""
-    ## 🚀 Quick Start
-    
-    ### For Railway Deployment:
-    
-    1. **Environment Variables** (set in Railway):
-       ```
-       API_BASE_URL=https://your-api.railway.app
-       API_KEY=your-api-key
-       USE_DEMO=1  # Enable demo mode fallback
-       ```
-    
-    2. **Connection Issues?**
-       - Check the Tools page for diagnostics
-       - Verify your API service is running
-       - Check Railway logs for errors
-       - Demo mode will activate automatically if API is unreachable
-    
-    ### Features:
-    
-    - **Automatic API Discovery**: Tries multiple endpoint patterns
-    - **Demo Mode**: Works without API connection
-    - **Connection Retry**: Automatic reconnection attempts
-    - **Endpoint Caching**: Remembers working endpoints
-    
-    ### Workflow:
-    
-    1. **Quick Generate**: Generate individual ODEs
-    2. **Batch Generation**: Generate multiple ODEs
-    3. **Verification**: Verify ODE solutions
-    4. **Datasets**: Manage ODE datasets
-    5. **ML Training**: Train ML models
-    6. **ML Generation**: Generate using ML
-    7. **Analysis**: Analyze generated data
-    
-    ### Troubleshooting:
-    
-    - **"No generators/functions available"**: 
-      - API is reachable but core modules missing
-      - Enable USE_DEMO=1 for demo mode
-    
-    - **"Cannot connect to API"**:
-      - Check API_BASE_URL is correct
-      - Verify API service is running
-      - Check network/firewall settings
-    
-    - **Railway specific**:
-      - Use internal domain for faster connections
-      - Check service is deployed and healthy
-      - Verify environment variables are set
-    """)
+**No baked-in prefix**
+- The GUI probes `/` then tries both `""` and `"/api/v1"` on first call.
+- Optionally set `API_PREFIX` to force a prefix.
 
-# ---------- Main App ----------
+**Server**
+- Default routes live at `/...`
+- Set `ADD_V1_ALIAS=1` on the server to additionally expose `/api/v1/...` aliases.
+""")
 
+# ---------- Router ----------
 def main():
     header()
-    
     with st.sidebar:
-        st.markdown("### Navigation")
-        
-        page = st.radio(
-            "Go to",
-            [
-                "🏠 Dashboard",
-                "⚡ Quick Generate",
-                "📦 Batch Generation",
-                "✅ Verification",
-                "📊 Datasets",
-                "🤖 ML Training",
-                "🧪 ML Generation",
-                "📈 Analysis",
-                "🛠️ Tools",
-                "📚 Docs"
-            ],
-        )
-        
-        st.markdown("---")
-        
-        # Connection status in sidebar
-        if st.session_state.api_reachable:
-            st.success("✅ API Connected")
-        elif st.session_state.using_demo:
-            st.warning("🔶 Demo Mode")
-        else:
-            st.error("❌ API Offline")
-        
-        st.caption(f"**URL:** {st.session_state.api_url}")
-        
-        if st.button("🔄 Refresh Connection"):
-            check_api_connection()
-            st.rerun()
-    
-    # Route to pages
-    if page == "🏠 Dashboard":
-        page_dashboard()
-    elif page == "⚡ Quick Generate":
-        page_quick_generate()
-    elif page == "📦 Batch Generation":
-        page_batch_generation()
-    elif page == "✅ Verification":
-        page_verify()
-    elif page == "📊 Datasets":
-        page_datasets()
-    elif page == "🤖 ML Training":
-        page_ml_training()
-    elif page == "🧪 ML Generation":
-        page_ml_generate()
-    elif page == "📈 Analysis":
-        page_analysis()
-    elif page == "🛠️ Tools":
-        page_tools()
-    elif page == "📚 Docs":
-        page_docs()
+        page = st.radio("Go to", ["🏠 Dashboard","⚡ Quick Generate","📦 Batch Generation","✅ Verification","📊 Datasets","🤖 ML Training","🧪 ML Generation","📈 Analysis","🛠️ Tools","📚 Docs"])
+        st.markdown("---"); st.caption(f"API: {API_BASE_URL}")
+        st.caption(f"Resolved prefix: {st.session_state.get('resolved_prefix', '(auto)')}")
+        st.caption(f"Demo mode: {'ON' if USE_DEMO else 'OFF'}")
+    if page == "🏠 Dashboard": page_dashboard()
+    elif page == "⚡ Quick Generate": page_quick_generate()
+    elif page == "📦 Batch Generation": page_batch_generation()
+    elif page == "✅ Verification": page_verify()
+    elif page == "📊 Datasets": page_datasets()
+    elif page == "🤖 ML Training": page_ml_training()
+    elif page == "🧪 ML Generation": page_ml_generate()
+    elif page == "📈 Analysis": page_analysis()
+    else: page_docs()
 
 if __name__ == "__main__":
     main()
