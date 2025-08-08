@@ -16,9 +16,11 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY . /app
 
-ENV RAILWAY_ENVIRONMENT=production
-
+ENV PYTHONPATH=/app
+ENV PORT=8080 RAILWAY_ENVIRONMENT=production
 EXPOSE 8080
+
+CMD ["python", "-m", "scripts.production_server"]
 
 # Optional: container-level healthcheck
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
