@@ -1,0 +1,16 @@
+
+{% extends "base.html" %}
+{% block content %}
+<h1>Jobs</h1>
+<div class="actions">
+  <select id="job-filter">
+    <option value="">All</option><option>queued</option><option>running</option>
+    <option>completed</option><option>failed</option><option>cancelled</option>
+  </select>
+  <button class="btn" onclick="loadJobs()">Refresh</button>
+</div>
+<table id="jobs-table" class="table">
+  <thead><tr><th>ID</th><th>Status</th><th>Progress</th><th>Updated</th><th>Actions</th></tr></thead>
+  <tbody></tbody>
+</table>
+{% endblock %}

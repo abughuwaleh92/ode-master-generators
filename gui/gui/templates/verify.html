@@ -1,0 +1,21 @@
+
+{% extends "base.html" %}
+{% block content %}
+<h1>Verify ODE</h1>
+<form id="verify-form" class="form">
+  <div class="row"><label>ODE (SymPy)</label><textarea id="ode" rows="4" placeholder="Eq(Derivative(y(x), x, 2) + y(x), pi*sin(x))"></textarea></div>
+  <div class="row"><label>Solution (SymPy)</label><textarea id="solution" rows="2" placeholder="pi*sin(x)"></textarea></div>
+  <div class="row">
+    <label>Method</label>
+    <select id="method">
+      <option value="substitution">substitution</option>
+      <option value="numeric">numeric</option>
+      <option value="series">series</option>
+      <option value="checkodesol">checkodesol</option>
+    </select>
+  </div>
+  <button type="button" class="btn primary" onclick="submitVerify()">Verify</button>
+</form>
+<h2>Result</h2>
+<pre id="verify-result" class="pre"></pre>
+{% endblock %}

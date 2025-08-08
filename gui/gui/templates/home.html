@@ -1,0 +1,36 @@
+
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h1>System Overview</h1>
+  <div class="grid">
+    <div class="card">
+      <h3>API Status</h3>
+      <pre id="root-status" class="mini pre"></pre>
+      <button class="btn" onclick="loadRoot()">Refresh</button>
+    </div>
+    <div class="card">
+      <h3>Statistics</h3>
+      <pre id="stats" class="mini pre"></pre>
+      <button class="btn" onclick="loadStats()">Refresh</button>
+    </div>
+    <div class="card">
+      <h3>Generators & Functions</h3>
+      <div class="split">
+        <div>
+          <strong>Generators</strong>
+          <ul id="gen-list"></ul>
+        </div>
+        <div>
+          <strong>Functions</strong>
+          <ul id="fn-list"></ul>
+        </div>
+      </div>
+      <button class="btn" onclick="loadCatalog()">Refresh</button>
+    </div>
+  </div>
+</section>
+<script>
+  document.addEventListener("DOMContentLoaded", () => { loadRoot(); loadStats(); loadCatalog(); });
+</script>
+{% endblock %}

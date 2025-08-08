@@ -1,0 +1,40 @@
+
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title if title else "ODE Master GUI" }}</title>
+  <link rel="stylesheet" href="/static/css/styles.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="/static/js/app.js"></script>
+</head>
+<body x-data="appState()">
+  <header class="topbar">
+    <div class="brand">ODE Master</div>
+    <nav class="navbar">
+      <a href="/ui">Home</a>
+      <a href="/ui/generate">Generate</a>
+      <a href="/ui/batch">Batch</a>
+      <a href="/ui/verify">Verify</a>
+      <a href="/ui/datasets">Datasets</a>
+      <a href="/ui/jobs">Jobs</a>
+      <a href="/ui/ml">ML</a>
+      <a href="/ui/monitor">Monitor</a>
+    </nav>
+    <div class="apikey">
+      <label>API Key</label>
+      <input type="password" x-model="apiKey" placeholder="X-API-Key" @change="saveKey()">
+      <button class="btn" @click="saveKey()">Save</button>
+    </div>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">
+    <div>© <span x-text="year"></span> ODE Master Generators • GUI</div>
+    <div class="env" id="env-info"></div>
+  </footer>
+</body>
+</html>

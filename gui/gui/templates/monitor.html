@@ -1,0 +1,16 @@
+
+{% extends "base.html" %}
+{% block content %}
+<h1>Monitoring</h1>
+<div class="grid">
+  <div class="card">
+    <h3>Prometheus /metrics</h3>
+    <a class="btn" href="/metrics" target="_blank">Open metrics endpoint</a>
+  </div>
+  <div class="card">
+    <h3>Live Stats</h3>
+    <pre id="stats-live" class="mini pre"></pre>
+    <button class="btn" onclick="loadStats()">Refresh</button>
+  </div>
+</div>
+{% endblock %}

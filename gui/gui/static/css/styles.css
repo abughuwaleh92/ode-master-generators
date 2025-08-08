@@ -1,0 +1,28 @@
+
+:root { --bg:#0b0d10; --card:#111418; --fg:#e6e6e6; --muted:#9aa4ad; --accent:#4da3ff; --green:#45c486; --red:#ff6b6b; }
+* { box-sizing: border-box; }
+body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif; background:var(--bg); color:var(--fg); }
+a { color:var(--accent); text-decoration:none; }
+.container { padding: 1.5rem; }
+.topbar { display:flex; align-items:center; justify-content:space-between; padding:.75rem 1rem; background:#0f1318; border-bottom:1px solid #1d2330; position:sticky; top:0; z-index:10; }
+.brand { font-weight:700; letter-spacing:.5px; }
+.navbar a { margin-right:1rem; }
+.apikey { display:flex; gap:.5rem; align-items:center; }
+.apikey input { width:14rem; }
+.footer { border-top:1px solid #1d2330; padding:1rem; display:flex; justify-content:space-between; color:var(--muted); }
+.grid { display:grid; gap:1rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.grid-2 { display:grid; gap:.8rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.card { background:var(--card); border:1px solid #1d2330; border-radius:8px; padding:1rem; }
+.form .row { display:flex; gap:.8rem; align-items:center; margin:.5rem 0; }
+.form textarea, .form input, .form select { width:100%; padding:.5rem; background:#0e1217; border:1px solid #222a37; color:var(--fg); border-radius:6px; }
+.btn { background:#1a2130; border:1px solid #232d3d; padding:.45rem .8rem; border-radius:6px; color:var(--fg); cursor:pointer; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color:#08111d; font-weight:600; }
+.table { width:100%; border-collapse:collapse; }
+.table th, .table td { border-bottom:1px solid #1f2836; padding:.5rem .6rem; text-align:left; vertical-align:top; }
+.mini { font-size:.9rem; }
+.pre { background:#0e1217; border:1px solid #222a37; padding:.6rem; border-radius:6px; overflow:auto; }
+.split { display:flex; gap:1rem; }
+.progress { height:12px; background:#0e1217; border:1px solid #222a37; border-radius:20px; overflow:hidden; margin:.8rem 0; }
+.progress .bar { height:100%; background:linear-gradient(90deg, var(--accent), #70c0ff); width:0; transition:width .3s ease; }
+.hidden { display:none; }
+.actions { margin:.5rem 0; }
