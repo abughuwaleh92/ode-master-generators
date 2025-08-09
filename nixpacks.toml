@@ -1,6 +1,5 @@
 [phases.setup]
-# Use Python 3.11 for better compatibility
-nixPkgs = ["python311", "nodejs_18", "gcc", "pkg-config"]
+nixPkgs = ["python311", "nodejs_18", "gcc"]
 
 [phases.install]
 cmds = [
