@@ -25,7 +25,7 @@ COPY ode_gui_bundle/package*.json ./
 ## Install front‑end dependencies.  `npm ci` uses the lock file if
 ## present and ensures repeatable builds.  We pass `--legacy-peer-deps`
 ## to accommodate packages that may have peer dependency mismatches.
-RUN npm ci --legacy-peer-deps
+RUN npm install --legacy-peer-deps
 
 ## Copy the rest of the GUI sources into the build context
 COPY ode_gui_bundle/ ./
