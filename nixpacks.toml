@@ -1,11 +1,37 @@
-[phases.setup]
-nixPkgs = ["python311", "nodejs_18", "gcc"]
+# nixpacks.toml - Configuration for Railway deployment
 
-[phases.install]
-cmds = [
-    "pip install -r requirements.txt",
-    "cd ode_gui_bundle && npm install && npm run build && cd .."
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.11"
+NIXPACKS_NODE_VERSION = "18"
+
+# Install system dependencies
+[phases.setup]
+nixPkgs = [
+    "python311",
+    "python311Packages.pip", 
+    "python311Packages.setuptools",
+    "python311Packages.wheel",
+    "nodejs_18",
+    "npm",
+    "git"
 ]
 
+# Install Python dependencies
+[phases.install]
+cmds = [
+    "python -m pip install --upgrade pip",
+    "pip install -r requirements.txt"
+]
+
+# Build the GUI
+[phases.build]
+cmds = [
+    "cd ode_gui_bundle",
+    "npm ci",
+    "npm run build",
+    "cd .."
+]
+
+# Start the production server
 [start]
 cmd = "python scripts/production_server.py"
