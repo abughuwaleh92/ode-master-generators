@@ -1,7 +1,13 @@
 [build]
 builder = "nixpacks"
+nixpacksPlan = "python-3.11"
+nixpacksConfigPath = "nixpacks.toml"
 
 [deploy]
+startCommand = "python scripts/production_server.py"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "always"
+restartPolicyMaxRetries = 3
+numReplicas = 1
+region = "us-west1"
