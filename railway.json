@@ -1,9 +1,54 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS"
+    "builder": "DOCKERFILE"
   },
   "deploy": {
-    "numReplicas": 1
-  }
+    "numReplicas": 1,
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 10,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3
+  },
+  "services": [
+    {
+      "name": "ode-api",
+      "source": {
+        "repo": ".",
+        "dockerfile": "Dockerfile.api"
+      },
+      "build": {
+        "dockerfilePath": "./Dockerfile.api",
+        "dockerContext": "."
+      },
+      "deploy": {
+        "startCommand": "python scripts/production_server.py",
+        "healthcheckPath": "/health",
+        "numReplicas": 1
+      },
+      "envVars": {
+        "ENVIRONMENT": "production",
+        "PORT": "8080",
+        "ENABLE_WEBSOCKET": "true",
+        "PUBLIC_READ": "false"
+      }
+    },
+    {
+      "name": "ode-gui",
+      "source": {
+        "repo": ".",
+        "dockerfile": "Dockerfile.gui"
+      },
+      "build": {
+        "dockerfilePath": "./Dockerfile.gui",
+        "dockerContext": "."
+      },
+      "deploy": {
+        "numReplicas": 1
+      },
+      "envVars": {
+        "ENABLE_WEBSOCKET": "true"
+      }
+    }
+  ]
 }
