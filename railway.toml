@@ -1,14 +1,27 @@
 [build]
-buildCommand = """
-    echo "Installing Python dependencies..." && \
-    pip install -r requirements.txt && \
-    echo "Building React GUI..." && \
-    cd ode_gui_bundle && \
-    npm install && \
-    npm run build && \
-    echo "GUI build complete!" && \
-    cd ..
-"""
+builder = "dockerfile"
 
 [deploy]
-startCommand = "python scripts/production_server.py"
+healthcheckPath = "/health"
+healthcheckTimeout = 10
+restartPolicyType = "always"
+
+# API Service Configuration
+[[services]]
+name = "ode-api"
+dockerfile = "Dockerfile.api"
+
+[services.env]
+ENVIRONMENT = "production"
+ENABLE_WEBSOCKET = "true"
+PUBLIC_READ = "false"
+ALLOWED_ORIGINS = "https://${{RAILWAY_STATIC_URL}}"
+
+# GUI Service Configuration  
+[[services]]
+name = "ode-gui"
+dockerfile = "Dockerfile.gui"
+
+[services.env]
+API_BASE = "https://${{RAILWAY_SERVICE_ODE_API_URL}}"
+ENABLE_WEBSOCKET = "true"
