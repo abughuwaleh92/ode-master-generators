@@ -32,6 +32,21 @@ from pydantic import BaseModel, Field, ConfigDict
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
 
 # ---------------- Environment / logging ----------------
+# ALLOWED_ORIGINS=https://ode-gui.up.railway.app,http://localhost:3000
+ALLOWED_ORIGINS = [
+    o.strip() for o in os.getenv("ALLOWED_ORIGINS", "https://ode-gui.up.railway.app").split(",")
+    if o.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,        # <-- no "*"
+    allow_credentials=True,               # keep if you plan to use cookies; otherwise set False
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["X-API-Key", "Content-Type", "Authorization"],
+    expose_headers=["Content-Disposition"],  # helpful for file downloads
+    max_age=3600,
+)
 PORT = int(os.getenv("PORT", "8080"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 API_KEYS = [k.strip() for k in os.getenv("API_KEY", "dev-key,railway-key").split(",") if k.strip()]
