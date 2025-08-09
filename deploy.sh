@@ -1,124 +1,187 @@
 #!/bin/bash
-# deploy.sh - Deploy to Railway
+# Railway deployment troubleshooting script
 
 set -e
 
-echo "🚀 Deploying ODE Master Generators to Railway"
+echo "🔧 Railway Deployment Troubleshooting"
+echo "======================================"
 
-# Function to check prerequisites
-check_prerequisites() {
-    echo "Checking prerequisites..."
+# Check current directory
+if [ ! -f "scripts/production_server.py" ]; then
+    echo "❌ Error: Run this script from the project root directory"
+    exit 1
+fi
+
+echo "📁 Project structure looks good"
+
+# Option 1: Try minimal nixpacks
+echo ""
+echo "🎯 OPTION 1: Minimal Nixpacks Configuration"
+echo "--------------------------------------------"
+
+cat > nixpacks.toml << 'EOF'
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.11"
+
+[nixpkgs]
+packages = ["python311", "python311Packages.pip"]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[phases.build]
+cmds = ["cd ode_gui_bundle && npm ci && npm run build"]
+
+[start]
+cmd = "python scripts/production_server.py"
+EOF
+
+cat > railway.toml << 'EOF'
+[build]
+builder = "nixpacks"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "always"
+
+[deploy.env]
+ENVIRONMENT = "production"
+ENABLE_WEBSOCKET = "true"
+PUBLIC_READ = "true"
+PORT = "8080"
+GUI_BUNDLE_DIR = "ode_gui_bundle/dist"
+EOF
+
+echo "✅ Created minimal nixpacks.toml and railway.toml"
+
+# Option 2: Create Dockerfile alternative
+echo ""
+echo "🐳 OPTION 2: Dockerfile Alternative (if nixpacks fails)"
+echo "------------------------------------------------------"
+
+cat > Dockerfile << 'EOF'
+# Multi-stage build
+FROM node:18-alpine AS gui-builder
+WORKDIR /app/gui
+COPY ode_gui_bundle/package*.json ./
+RUN npm ci
+COPY ode_gui_bundle/ ./
+RUN npm run build
+
+FROM python:3.11-slim
+RUN apt-get update && apt-get install -y gcc g++ && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+COPY --from=gui-builder /app/gui/dist ./ode_gui_bundle/dist
+RUN adduser --disabled-password appuser && chown -R appuser:appuser /app
+USER appuser
+EXPOSE 8080
+CMD ["python", "scripts/production_server.py"]
+EOF
+
+cat > railway-docker.toml << 'EOF'
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "always"
+
+[deploy.env]
+ENVIRONMENT = "production"
+ENABLE_WEBSOCKET = "true"
+PUBLIC_READ = "true"
+PORT = "8080"
+GUI_BUNDLE_DIR = "ode_gui_bundle/dist"
+EOF
+
+echo "✅ Created Dockerfile and railway-docker.toml"
+
+# Create minimal requirements.txt
+echo ""
+echo "📦 Creating minimal requirements.txt"
+echo "------------------------------------"
+
+cat > requirements.txt << 'EOF'
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+numpy==1.24.3
+sympy==1.12
+prometheus-client==0.19.0
+PyYAML==6.0.1
+Jinja2==3.1.2
+EOF
+
+echo "✅ Created minimal requirements.txt"
+
+# Check package.json
+echo ""
+echo "📋 Checking GUI configuration"
+echo "-----------------------------"
+
+if [ -f "ode_gui_bundle/package.json" ]; then
+    echo "✅ package.json found"
     
-    # Check if Railway CLI is installed
-    if ! command -v railway &> /dev/null; then
-        echo "❌ Railway CLI not found. Installing..."
-        npm install -g @railway/cli
+    # Check if build script exists
+    if grep -q '"build"' ode_gui_bundle/package.json; then
+        echo "✅ Build script found in package.json"
+    else
+        echo "⚠️  Warning: No build script found in package.json"
+        echo "   Add this to package.json scripts section:"
+        echo '   "build": "vite build"'
     fi
+else
+    echo "❌ ode_gui_bundle/package.json not found"
+    echo "   Creating basic package.json..."
     
-    # Check if logged in to Railway
-    if ! railway whoami &> /dev/null; then
-        echo "📝 Please login to Railway:"
-        railway login
-    fi
+    mkdir -p ode_gui_bundle
+    cat > ode_gui_bundle/package.json << 'EOF'
+{
+  "name": "ode-gui",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "echo 'No GUI build needed' && mkdir -p dist && echo '<h1>GUI Placeholder</h1>' > dist/index.html"
+  }
 }
+EOF
+    echo "✅ Created basic package.json with placeholder build"
+fi
 
-# Function to setup Railway project
-setup_railway_project() {
-    echo "Setting up Railway project..."
-    
-    # Initialize Railway project if not exists
-    if [ ! -f ".railway" ]; then
-        railway init
-    fi
-}
+echo ""
+echo "🚀 Deployment Options"
+echo "====================="
+echo ""
+echo "OPTION A: Try Nixpacks first"
+echo "-----------------------------"
+echo "railway up"
+echo ""
+echo "OPTION B: If nixpacks fails, try Docker"
+echo "---------------------------------------"
+echo "mv railway.toml railway-nixpacks.toml"
+echo "mv railway-docker.toml railway.toml"
+echo "railway up"
+echo ""
+echo "OPTION C: Deploy without GUI first"
+echo "----------------------------------"
+echo "# Remove GUI build from nixpacks.toml phases.build"
+echo "# Set GUI_BUNDLE_DIR to empty or comment out"
+echo "railway up"
 
-# Function to deploy API service
-deploy_api() {
-    echo "📦 Deploying API service..."
-    
-    # Create API service if not exists
-    railway service create ode-api || true
-    
-    # Set API environment variables
-    railway variables set \
-        ENVIRONMENT=production \
-        PORT=8080 \
-        ENABLE_WEBSOCKET=true \
-        PUBLIC_READ=false \
-        API_KEYS="${API_KEYS:-$(openssl rand -hex 32)}" \
-        --service ode-api
-    
-    # Deploy API
-    railway up --service ode-api --dockerfile Dockerfile.api
-    
-    # Get API URL
-    API_URL=$(railway status --service ode-api --json | jq -r '.url')
-    echo "✅ API deployed at: $API_URL"
-}
+echo ""
+echo "🔍 Debugging Commands"
+echo "====================="
+echo "railway logs          # View deployment logs"
+echo "railway status        # Check deployment status"
+echo "railway variables     # Check environment variables"
+echo "railway shell         # Access deployed container"
 
-# Function to deploy GUI service
-deploy_gui() {
-    echo "📦 Deploying GUI service..."
-    
-    # Create GUI service if not exists
-    railway service create ode-gui || true
-    
-    # Set GUI environment variables
-    railway variables set \
-        API_BASE="$API_URL" \
-        ENABLE_WEBSOCKET=true \
-        --service ode-gui
-    
-    # Deploy GUI
-    railway up --service ode-gui --dockerfile Dockerfile.gui
-    
-    # Get GUI URL
-    GUI_URL=$(railway status --service ode-gui --json | jq -r '.url')
-    echo "✅ GUI deployed at: $GUI_URL"
-}
-
-# Function to setup Redis (if needed)
-setup_redis() {
-    echo "📦 Setting up Redis..."
-    
-    # Add Redis plugin
-    railway plugin create redis || true
-    
-    # Get Redis URL
-    REDIS_URL=$(railway variables get REDIS_URL)
-    
-    # Update API with Redis URL
-    railway variables set REDIS_URL="$REDIS_URL" --service ode-api
-}
-
-# Main deployment flow
-main() {
-    check_prerequisites
-    setup_railway_project
-    
-    # Optional: Setup Redis
-    read -p "Do you want to add Redis caching? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        setup_redis
-    fi
-    
-    # Deploy services
-    deploy_api
-    deploy_gui
-    
-    echo "
-    ✨ Deployment Complete! ✨
-    
-    API URL: $API_URL
-    GUI URL: $GUI_URL
-    
-    Next steps:
-    1. Update ALLOWED_ORIGINS for API: railway variables set ALLOWED_ORIGINS=$GUI_URL --service ode-api
-    2. Generate API keys: railway variables set API_KEYS=your-secure-keys --service ode-api
-    3. Monitor logs: railway logs --service ode-api
-    "
-}
-
-# Run main function
-main
+echo ""
+echo "✅ Troubleshooting setup complete!"
+echo "   Try the deployment options above in order."
