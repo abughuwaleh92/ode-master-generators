@@ -1,5 +1,5 @@
 [build]
-builder = "dockerfile"
+builder = "nixpacks"
 
 [deploy]
 healthcheckPath = "/health"
@@ -9,8 +9,9 @@ restartPolicyType = "always"
 # API Service Configuration
 [[services]]
 name = "ode-api"
-dockerfile = "Dockerfile.api"
-
+source = "./api"  # Point to your API source directory
+[services.build]
+builder = "nixpacks"
 [services.env]
 ENVIRONMENT = "production"
 ENABLE_WEBSOCKET = "true"
@@ -20,8 +21,9 @@ ALLOWED_ORIGINS = "https://${{RAILWAY_STATIC_URL}}"
 # GUI Service Configuration  
 [[services]]
 name = "ode-gui"
-dockerfile = "Dockerfile.gui"
-
+source = "./gui"  # Point to your GUI source directory
+[services.build]
+builder = "nixpacks"
 [services.env]
 API_BASE = "https://${{RAILWAY_SERVICE_ODE_API_URL}}"
 ENABLE_WEBSOCKET = "true"
