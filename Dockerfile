@@ -103,4 +103,5 @@ EXPOSE 8080
 #   CMD curl -fsS "http://127.0.0.1:${PORT}/health" || exit 1
 
 # Use Uvicorn to run the FastAPI app inside the container
-CMD ["uvicorn", "scripts.production_server:app", "--host", "0.0.0.0", "--port", "8080", "--lifespan", "on", "--workers", "1"]
+# replace the previous CMD with this:
+CMD ["sh", "-c", "uvicorn scripts.production_server:app --host 0.0.0.0 --port ${PORT:-8080} --lifespan on --workers 1"]
