@@ -1,8 +1,10 @@
 # scripts/production_server.py
 """
 Production FastAPI server for ODE Master Generators System
-Optimized for Railway deployment with full GUI integration support
+Optimized for Railway deployment with full GUI integration support.
 """
+
+from __future__ import annotations
 
 import os
 import sys
@@ -22,7 +24,10 @@ from collections import defaultdict, deque
 import numpy as np
 import pandas as pd
 import sympy as sp
-from fastapi import FastAPI, HTTPException, Depends, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI, HTTPException, Depends, Request, Response,
+    WebSocket, WebSocketDisconnect
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -31,10 +36,12 @@ from pydantic import BaseModel, Field, ConfigDict
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
 import redis
 
-# Make project modules importable when running as "python -m scripts.production_server"
+# Ensure project root is importable (when run as `python -m scripts.production_server`)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# ====== Optional project module imports with fallbacks ======
+# -----------------------------
+# Optional project imports
+# -----------------------------
 try:
     from pipeline.generator import ODEDatasetGenerator
     from verification.verifier import ODEVerifier
@@ -42,24 +49,25 @@ try:
     from utils.features import FeatureExtractor
     from core.types import GeneratorType, VerificationMethod, ODEInstance
     from core.functions import AnalyticFunctionLibrary
-    from core.symbols import SYMBOLS  # noqa: F401  (may be used in templates)
+    from core.symbols import SYMBOLS  # noqa: F401
     CORE_IMPORTS_AVAILABLE = True
-except ImportError as e:
+except Exception as e:
     logging.warning(f"Core imports not available: {e}")
     CORE_IMPORTS_AVAILABLE = False
 
-    class GeneratorType(Enum):  # minimal fallback
+    # Minimal fallbacks to keep API responsive in demo mode
+    class GeneratorType(Enum):
         LINEAR = "linear"
         NONLINEAR = "nonlinear"
 
-    class VerificationMethod(Enum):  # minimal fallback
+    class VerificationMethod(Enum):
         SUBSTITUTION = "substitution"
         CHECKODESOL = "checkodesol"
         NUMERIC = "numeric"
         FAILED = "failed"
         PENDING = "pending"
 
-# ML stack (optional)
+# Optional ML stack
 try:
     import torch
     from ml_pipeline.train_ode_generator import ODEGeneratorTrainer
@@ -71,21 +79,28 @@ except Exception:
     ML_AVAILABLE = False
     logging.warning("ML pipeline not available")
 
-# ====== Logging ======
+# -----------------------------
+# Logging
+# -----------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# ====== Environment / Config ======
+# -----------------------------
+# Environment
+# -----------------------------
 PORT = int(os.getenv("PORT", "8080"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-API_KEYS = os.getenv("API_KEYS", "dev-key,test-key,railway-key").split(",")
+# Comma-separated list of valid API keys, e.g. "dev-key,railway-key,abc123"
+API_KEYS = [k.strip() for k in os.getenv("API_KEYS", "dev-key,test-key,railway-key").split(",") if k.strip()]
 ENVIRONMENT = os.getenv("RAILWAY_ENVIRONMENT", "development")
 ENABLE_WEBSOCKET = os.getenv("ENABLE_WEBSOCKET", "true").lower() == "true"
 
-# ====== Redis (with graceful in-memory fallback) ======
+# -----------------------------
+# Redis (with in-memory fallback)
+# -----------------------------
 try:
     if REDIS_URL.startswith(("redis://", "rediss://")):
         redis_client = redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=5)
@@ -116,7 +131,7 @@ except Exception as e:
         def setex(self, key: str, ttl: int, value: str):
             self.set(key, value, ex=ttl)
 
-        def delete(self, *keys):
+        def delete(self, *keys: str):
             for k in keys:
                 self.cache.pop(k, None)
                 self.ttls.pop(k, None)
@@ -138,7 +153,9 @@ except Exception as e:
 
     redis_client = InMemoryCache()
 
-# ====== Metrics ======
+# -----------------------------
+# Prometheus metrics
+# -----------------------------
 ode_generation_counter = Counter("ode_generation_total", "Total ODEs generated", ["generator", "function"])
 verification_counter = Counter("ode_verification_total", "Total verifications", ["method", "result"])
 generation_time_histogram = Histogram("ode_generation_duration_seconds", "ODE generation time")
@@ -148,11 +165,15 @@ api_request_duration = Histogram("api_request_duration_seconds", "API request du
 websocket_connections = Gauge("websocket_connections", "Active WebSocket connections")
 dataset_size_gauge = Gauge("dataset_size_bytes", "Total size of datasets")
 
-# ====== Pydantic base ======
+# -----------------------------
+# Pydantic base
+# -----------------------------
 class APIModel(BaseModel):
-    model_config = ConfigDict(protected_namespaces=())  # fixes model_* warning in v2
+    model_config = ConfigDict(protected_namespaces=())  # allow fields named "model_*" etc.
 
-# ====== Schemas ======
+# -----------------------------
+# Schemas
+# -----------------------------
 class ODEGenerationRequest(APIModel):
     generator: str = Field(..., description="Generator name (e.g., L1, N1)")
     function: str = Field(..., description="Function name (e.g., sine, exponential)")
@@ -203,7 +224,13 @@ class JobStatus(APIModel):
     eta: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
-# ====== Jobs ======
+class CreateDatasetBody(APIModel):
+    odes: List[Dict[str, Any]]
+    name: Optional[str] = None
+
+# -----------------------------
+# Job manager
+# -----------------------------
 class JobManager:
     def __init__(self):
         self.jobs: Dict[str, Dict[str, Any]] = {}
@@ -283,7 +310,9 @@ class JobManager:
     def get_queue_stats(self) -> Dict[str, int]:
         return {jt: len(q) for jt, q in self.job_queues.items()}
 
-# ====== WebSocket ======
+# -----------------------------
+# WebSocket manager
+# -----------------------------
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
@@ -321,7 +350,9 @@ class ConnectionManager:
     def unsubscribe(self, client_id: str, topic: str):
         self.subscriptions[topic].discard(client_id)
 
-# ====== Core service ======
+# -----------------------------
+# Core ODE service
+# -----------------------------
 class ODEService:
     def __init__(self):
         self.config = ConfigManager() if CORE_IMPORTS_AVAILABLE else None
@@ -339,6 +370,7 @@ class ODEService:
                 self.verifier = ODEVerifier(self.config.config.get("verification", {}))
                 self.feature_extractor = FeatureExtractor()
                 self.function_library = AnalyticFunctionLibrary.get_safe_library()
+
                 self.working_generators = self.generator.test_generators()
                 logger.info(
                     f"Initialized {len(self.working_generators['linear'])} linear and "
@@ -366,6 +398,7 @@ class ODEService:
 
     async def generate_ode(self, generator: str, function: str, params: Optional[Dict] = None) -> Optional[Dict]:
         if not CORE_IMPORTS_AVAILABLE or not self.generator:
+            # Demo payload
             return {
                 "id": str(uuid.uuid4()),
                 "generator": generator,
@@ -378,7 +411,7 @@ class ODEService:
             }
         try:
             gen_type = "linear" if generator in self.working_generators["linear"] else "nonlinear"
-            ode_instance = self.generator.generate_single_ode(
+            ode_instance: Optional[ODEInstance] = self.generator.generate_single_ode(
                 generator=self.working_generators[gen_type][generator],
                 gen_type=gen_type,
                 gen_name=generator,
@@ -402,7 +435,7 @@ class ODEService:
             logger.error(f"Error generating ODE: {e}")
         return None
 
-    async def verify_ode(self, ode: str, solution: str, method: str = "substitution") -> Dict:
+    async def verify_ode(self, ode: str, solution: str, method: str = "substitution") -> Dict[str, Any]:
         if not CORE_IMPORTS_AVAILABLE or not self.verifier:
             return {"verified": False, "method": method, "confidence": 0.0, "error": "Verification service not available"}
         try:
@@ -413,7 +446,9 @@ class ODEService:
         except Exception as e:
             return {"verified": False, "method": method, "confidence": 0.0, "error": str(e)}
 
-# ====== Lifespan ======
+# -----------------------------
+# App lifespan
+# -----------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting ODE Master Generators Server on port {PORT}")
@@ -433,90 +468,28 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("Shutting down server...")
 
-# ====== FastAPI app ======
+# -----------------------------
+# FastAPI app
+# -----------------------------
 app = FastAPI(
     title="ODE Master Generators API",
-    description="Production API for ODE generation, verification, datasets, jobs, ML, metrics",
+    description="Production API for ODE generation, verification, datasets, jobs, ML, and metrics",
     version="3.0.0",
     lifespan=lifespan,
 )
 
-# ----- GUI (prebuilt bundle) -----
-from fastapi.responses import HTMLResponse  # noqa: E402
-
-GUI_BUNDLE_DIR_ENV = os.getenv("GUI_BUNDLE_DIR", "").strip()
-CANDIDATES: List[Path] = []
-if GUI_BUNDLE_DIR_ENV:
-    CANDIDATES.append(Path(GUI_BUNDLE_DIR_ENV))
-repo_root = Path(__file__).resolve().parents[1]
-CANDIDATES += [
-    repo_root / "ode_gui_bundle",
-    repo_root / "ode_gui_bundle" / "dist",
-    repo_root / "ode_gui_bundle" / "build",
-    repo_root / "gui" / "gui" / "dist",
-]
-BUNDLE_DIR: Optional[Path] = None
-for root in CANDIDATES:
-    if (root / "index.html").exists():
-        BUNDLE_DIR = root
-        break
-
-if BUNDLE_DIR:
-    assets_dir = BUNDLE_DIR / "assets"
-    if assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
-    else:
-        logger.warning(f"GUI found at {BUNDLE_DIR}, but no assets/ folder. If index.html references /assets/*, those will 404.")
-
-    @app.get("/config.js")
-    async def config_js():
-        api_base = os.getenv("PUBLIC_API_BASE", "")  # e.g. "https://ode.up.railway.app"
-        api_key = os.getenv("PUBLIC_API_KEY", "")    # set only if intentionally public
-        ws_enabled = os.getenv("ENABLE_WEBSOCKET", "true").lower() == "true"
-        content = "window.ODE_CONFIG=" + json.dumps({"API_BASE": api_base, "API_KEY": api_key, "WS": ws_enabled}) + ";"
-        return Response(content, media_type="application/javascript")
-
-    @app.get("/", response_class=HTMLResponse)
-    async def spa_index():
-        return FileResponse(BUNDLE_DIR / "index.html")
-
-    @app.get("/{full_path:path}", response_class=HTMLResponse)
-    async def spa_fallback(full_path: str):
-        target = BUNDLE_DIR / full_path
-        if target.exists() and target.is_file():
-            return FileResponse(target)
-        return FileResponse(BUNDLE_DIR / "index.html")
-else:
-    logger.warning(
-        "GUI bundle not found. Looked in:\n  - " + "\n  - ".join(str(p) for p in CANDIDATES) +
-        "\nSet GUI_BUNDLE_DIR env var to the folder containing index.html."
-    )
-
-    @app.get("/")
-    async def root_info():
-        return {
-            "name": "ODE Master Generators API",
-            "version": "3.0.0",
-            "status": "operational",
-            "environment": ENVIRONMENT,
-            "features": {
-                "core": CORE_IMPORTS_AVAILABLE,
-                "ml": ML_AVAILABLE,
-                "redis": REDIS_AVAILABLE,
-                "websocket": ENABLE_WEBSOCKET,
-            },
-        }
-
-# ----- CORS -----
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # set your domains in production
+    allow_origins=["*"],  # tighten this in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ====== Security ======
+# -----------------------------
+# Security
+# -----------------------------
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 async def verify_api_key(api_key: str = Depends(api_key_header)):
@@ -524,7 +497,9 @@ async def verify_api_key(api_key: str = Depends(api_key_header)):
         raise HTTPException(status_code=403, detail="Invalid or missing API key")
     return api_key
 
-# ====== Request metrics ======
+# -----------------------------
+# Request metrics middleware
+# -----------------------------
 @app.middleware("http")
 async def track_metrics(request: Request, call_next):
     start = time.time()
@@ -534,7 +509,9 @@ async def track_metrics(request: Request, call_next):
     api_request_duration.labels(endpoint=request.url.path).observe(duration)
     return response
 
-# ====== Health / metrics / info ======
+# -----------------------------
+# Health & Info & Metrics
+# -----------------------------
 @app.get("/health")
 async def health_check():
     return {
@@ -567,7 +544,9 @@ async def api_info():
         },
     }
 
-# ====== ODE generation ======
+# -----------------------------
+# ODE generation / verification
+# -----------------------------
 @app.get("/api/generators")
 async def list_generators(api_key: str = Depends(verify_api_key)):
     s = app.state.ode_service
@@ -612,7 +591,9 @@ async def verify_ode(request: ODEVerificationRequest, api_key: str = Depends(ver
     verification_counter.labels(method=result.get("method", request.method), result="success" if result.get("verified") else "failed").inc()
     return result
 
-# ====== Datasets ======
+# -----------------------------
+# Datasets
+# -----------------------------
 @app.get("/api/datasets")
 async def list_datasets(api_key: str = Depends(verify_api_key)):
     datasets = []
@@ -635,30 +616,35 @@ async def list_datasets(api_key: str = Depends(verify_api_key)):
     return {"datasets": datasets, "count": len(datasets)}
 
 @app.post("/api/datasets/create")
-async def create_dataset(odes: List[Dict[str, Any]], name: Optional[str] = None, api_key: str = Depends(verify_api_key)):
-    if not name:
-        name = f"dataset_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+async def create_dataset(body: CreateDatasetBody, api_key: str = Depends(verify_api_key)):
+    name = body.name or f"dataset_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
     fp = Path("data") / f"{name}.jsonl"
     fp.parent.mkdir(parents=True, exist_ok=True)
+
     with open(fp, "w") as f:
-        for ode in odes:
+        for ode in body.odes:
             f.write(json.dumps(ode) + "\n")
-    verified_count = sum(1 for ode in odes if ode.get("verified", False))
-    verification_rate = verified_count / len(odes) if odes else 0.0
+
+    verified_count = sum(1 for ode in body.odes if ode.get("verified", False))
+    verification_rate = verified_count / len(body.odes) if body.odes else 0.0
+
     metadata = {
         "name": name,
         "path": str(fp),
-        "size": len(odes),
+        "size": len(body.odes),
         "verified_count": verified_count,
         "verification_rate": verification_rate,
         "created_at": datetime.utcnow().isoformat(),
     }
+
     if REDIS_AVAILABLE:
         redis_client.setex(f"dataset:{name}", 86400, json.dumps(metadata))
+
     try:
         dataset_size_gauge.inc(fp.stat().st_size)
     except Exception:
         pass
+
     return metadata
 
 @app.get("/api/datasets/{name}/download")
@@ -666,16 +652,20 @@ async def download_dataset(name: str, format: str = "jsonl", api_key: str = Depe
     fp = Path("data") / f"{name}.jsonl"
     if not fp.exists():
         raise HTTPException(404, "Dataset not found")
+
     if format == "jsonl":
         return FileResponse(fp, filename=f"{name}.jsonl")
-    if format == "csv":
+    elif format == "csv":
         df = pd.read_json(fp, lines=True)
         tmp = Path("/tmp") / f"{name}.csv"
         df.to_csv(tmp, index=False)
         return FileResponse(tmp, filename=f"{name}.csv")
-    raise HTTPException(400, f"Unsupported format: {format}")
+    else:
+        raise HTTPException(400, f"Unsupported format: {format}")
 
-# ====== Jobs ======
+# -----------------------------
+# Jobs
+# -----------------------------
 @app.get("/api/jobs/{job_id}")
 async def get_job_status(job_id: str, api_key: str = Depends(verify_api_key)):
     job = await app.state.job_manager.get_job(job_id)
@@ -702,7 +692,7 @@ async def list_jobs(status: Optional[str] = None, limit: int = 100, api_key: str
                 job_id=j["id"],
                 status=j["status"],
                 progress=j["progress"],
-                results=None,
+                results=None,  # omit heavy results in listing
                 error=j.get("error"),
                 created_at=j["created_at"],
                 updated_at=j["updated_at"],
@@ -722,16 +712,21 @@ async def cancel_job(job_id: str, api_key: str = Depends(verify_api_key)):
     if job["status"] in ["completed", "failed"]:
         raise HTTPException(400, f"Cannot cancel {job['status']} job")
     await app.state.job_manager.update_job(job_id, {"status": "cancelled", "error": "Cancelled by user"})
+    active_jobs_gauge.dec()
     return {"message": "Job cancelled"}
 
-# ====== ML ======
+# -----------------------------
+# ML endpoints (optional)
+# -----------------------------
 @app.post("/api/ml/train")
 async def train_ml_model(request: MLTrainingRequest, api_key: str = Depends(verify_api_key)):
     if not ML_AVAILABLE:
         raise HTTPException(503, "ML pipeline not available")
+
     dataset_path = Path("data") / f"{request.dataset}.jsonl"
     if not dataset_path.exists():
         raise HTTPException(404, f"Dataset {request.dataset} not found")
+
     job_id = await app.state.job_manager.create_job("ml_training", request.dict(), priority=15)
     return {"job_id": job_id, "status": "queued", "check_status_url": f"/api/jobs/{job_id}"}
 
@@ -739,9 +734,11 @@ async def train_ml_model(request: MLTrainingRequest, api_key: str = Depends(veri
 async def generate_with_ml(request: MLGenerationRequest, api_key: str = Depends(verify_api_key)):
     if not ML_AVAILABLE:
         raise HTTPException(503, "ML pipeline not available")
+
     model_path = Path("models") / request.model_path
     if not model_path.exists():
         raise HTTPException(404, f"Model {request.model_path} not found")
+
     job_id = await app.state.job_manager.create_job("ml_generation", request.dict())
     return {"job_id": job_id, "status": "queued", "check_status_url": f"/api/jobs/{job_id}"}
 
@@ -788,7 +785,9 @@ async def get_statistics(api_key: str = Depends(verify_api_key)):
         "queue_stats": app.state.job_manager.get_queue_stats(),
     }
 
-# ====== WebSocket ======
+# -----------------------------
+# WebSocket endpoint (optional)
+# -----------------------------
 if ENABLE_WEBSOCKET:
     @app.websocket("/ws/{client_id}")
     async def websocket_endpoint(websocket: WebSocket, client_id: str):
@@ -810,35 +809,43 @@ if ENABLE_WEBSOCKET:
         except WebSocketDisconnect:
             app.state.ws_manager.disconnect(client_id)
 
-# ====== Job processors ======
+# -----------------------------
+# Background processors
+# -----------------------------
 async def process_generation_job(app: FastAPI, job_id: str, request: ODEGenerationRequest):
     try:
         await app.state.job_manager.update_job(job_id, {"status": "running", "started_at": datetime.utcnow().isoformat()})
-        results = []
+        results: List[Dict[str, Any]] = []
         svc = app.state.ode_service
+
         with generation_time_histogram.time():
             for i in range(request.count):
-                await app.state.job_manager.update_job(job_id, {
-                    "progress": ((i) / max(1, request.count)) * 100.0,
-                    "metadata": {"current": i, "total": request.count},
-                })
                 ode_data = await svc.generate_ode(request.generator, request.function, request.parameters)
                 if ode_data:
                     if request.verify:
                         ode_data["verification"] = await svc.verify_ode(ode_data["ode"], ode_data["solution"])
                     results.append(ode_data)
                     ode_generation_counter.labels(generator=request.generator, function=request.function).inc()
-                    if request.stream and ENABLE_WEBSOCKET:
-                        await app.state.ws_manager.broadcast(
-                            json.dumps({"type": "ode_generated", "job_id": job_id, "ode": ode_data}),
-                            topic=f"job:{job_id}",
-                        )
+
+                # progress after each attempt
+                await app.state.job_manager.update_job(job_id, {
+                    "progress": ((i + 1) / max(1, request.count)) * 100.0,
+                    "metadata": {"current": i + 1, "total": request.count},
+                })
+
+                if request.stream and ENABLE_WEBSOCKET:
+                    await app.state.ws_manager.broadcast(
+                        json.dumps({"type": "ode_generated", "job_id": job_id, "ode": ode_data}),
+                        topic=f"job:{job_id}",
+                    )
+
         if REDIS_AVAILABLE:
             redis_client.incr("stats:generated_24h")
             if results:
                 verified = sum(1 for r in results if r.get("verified", False))
                 rate = verified / len(results)
                 redis_client.set("stats:verification_rate", str(rate))
+
         await app.state.job_manager.complete_job(job_id, results)
     except Exception as e:
         logger.error(f"Generation job {job_id} failed: {e}\n{traceback.format_exc()}")
@@ -847,28 +854,32 @@ async def process_generation_job(app: FastAPI, job_id: str, request: ODEGenerati
 async def process_batch_generation_job(app: FastAPI, job_id: str, request: BatchGenerationRequest):
     try:
         await app.state.job_manager.update_job(job_id, {"status": "running"})
-        results = []
+        results: List[Dict[str, Any]] = []
         svc = app.state.ode_service
         total = len(request.generators) * len(request.functions) * request.samples_per_combination
         current = 0
+
         for g in request.generators:
             for f in request.functions:
                 for _ in range(request.samples_per_combination):
-                    current += 1
-                    await app.state.job_manager.update_job(job_id, {
-                        "progress": (current / max(1, total)) * 100.0,
-                        "metadata": {"current": current, "total": total, "generator": g, "function": f},
-                    })
                     params: Dict[str, Any] = {}
                     if request.parameter_ranges:
                         for k, values in request.parameter_ranges.items():
                             if isinstance(values, list) and values:
                                 params[k] = np.random.choice(values)
+
                     ode_data = await svc.generate_ode(g, f, params)
                     if ode_data:
                         if request.verify:
                             ode_data["verification"] = await svc.verify_ode(ode_data["ode"], ode_data["solution"])
                         results.append(ode_data)
+
+                    current += 1
+                    await app.state.job_manager.update_job(job_id, {
+                        "progress": (current / max(1, total)) * 100.0,
+                        "metadata": {"current": current, "total": total, "generator": g, "function": f},
+                    })
+
         dataset_name = None
         if request.save_dataset and results:
             dataset_name = request.dataset_name or f"batch_{job_id[:8]}"
@@ -877,6 +888,7 @@ async def process_batch_generation_job(app: FastAPI, job_id: str, request: Batch
             with open(ds_path, "w") as f:
                 for ode in results:
                     f.write(json.dumps(ode) + "\n")
+
             metadata = {
                 "name": dataset_name,
                 "path": str(ds_path),
@@ -887,6 +899,7 @@ async def process_batch_generation_job(app: FastAPI, job_id: str, request: Batch
             }
             if REDIS_AVAILABLE:
                 redis_client.setex(f"dataset:{dataset_name}", 86400, json.dumps(metadata))
+
         await app.state.job_manager.complete_job(job_id, {
             "total_generated": len(results),
             "dataset_name": dataset_name,
@@ -906,11 +919,14 @@ async def process_ml_training_job(app: FastAPI, job_id: str, request: MLTraining
         return
     try:
         await app.state.job_manager.update_job(job_id, {"status": "running"})
+
         dataset_path = Path("data") / f"{request.dataset}.jsonl"
         ml_dir = Path("ml_data") / job_id
         ml_dir.mkdir(parents=True, exist_ok=True)
+
         data_paths = prepare_ml_dataset(str(dataset_path), output_dir=str(ml_dir), test_split=0.2, val_split=request.validation_split)
         trainer = ODEGeneratorTrainer(dataset_path=str(dataset_path), features_path=data_paths["train"])
+
         model_path = None
         if request.model_type == "pattern_net":
             model = trainer.train_pattern_network(epochs=request.epochs, batch_size=request.batch_size)
@@ -920,6 +936,7 @@ async def process_ml_training_job(app: FastAPI, job_id: str, request: MLTraining
             model_path = f"models/{job_id}_transformer.pth"
         else:
             raise ValueError(f"Unsupported model_type: {request.model_type}")
+
         if model_path:
             Path("models").mkdir(exist_ok=True)
             torch.save(model.state_dict(), model_path)
@@ -933,6 +950,7 @@ async def process_ml_training_job(app: FastAPI, job_id: str, request: MLTraining
             }
             with open(Path(model_path).with_suffix(".json"), "w") as f:
                 json.dump(meta, f)
+
         await app.state.job_manager.complete_job(job_id, {"model_path": model_path, "training_completed": True})
     except Exception as e:
         logger.error(f"ML training job {job_id} failed: {e}")
@@ -944,11 +962,13 @@ async def process_ml_generation_job(app: FastAPI, job_id: str, request: MLGenera
         return
     try:
         await app.state.job_manager.update_job(job_id, {"status": "running"})
+
         model = load_pretrained_model(
             model_type="pattern_net",  # could infer from filename if desired
             checkpoint_path=f"models/{request.model_path}",
             device="cuda" if torch.cuda.is_available() else "cpu",
         )
+
         generated_odes = generate_novel_odes(
             model=model,
             n_samples=request.n_samples,
@@ -956,12 +976,13 @@ async def process_ml_generation_job(app: FastAPI, job_id: str, request: MLGenera
             functions=request.functions,
             temperature=request.temperature,
         )
+
         await app.state.job_manager.complete_job(job_id, {"generated_odes": generated_odes, "count": len(generated_odes)})
     except Exception as e:
         logger.error(f"ML generation job {job_id} failed: {e}")
         await app.state.job_manager.fail_job(job_id, str(e))
 
-# ====== Background loops ======
+# Background workers
 async def job_processor(app: FastAPI):
     while True:
         try:
@@ -972,6 +993,7 @@ async def job_processor(app: FastAPI):
                 job = await app.state.job_manager.get_job(job_id)
                 if not job or job["status"] != "queued":
                     continue
+
                 if job_type == "generation":
                     asyncio.create_task(process_generation_job(app, job_id, ODEGenerationRequest(**job["params"])))
                 elif job_type == "batch_generation":
@@ -982,6 +1004,7 @@ async def job_processor(app: FastAPI):
                     asyncio.create_task(process_ml_generation_job(app, job_id, MLGenerationRequest(**job["params"])))
                 else:
                     logger.warning(f"Unknown job type: {job_type}")
+
             await asyncio.sleep(1)
         except Exception as e:
             logger.error(f"Job processor error: {e}")
@@ -992,12 +1015,14 @@ async def metrics_collector(app: FastAPI):
         try:
             await asyncio.sleep(60)
             if REDIS_AVAILABLE:
-                active_jobs = sum(1 for j in app.state.job_manager.jobs.values() if j["status"] in ["running", "queued"])
-                redis_client.set("metrics:active_jobs", str(active_jobs))
+                active = sum(1 for j in app.state.job_manager.jobs.values() if j["status"] in ["running", "queued"])
+                redis_client.set("metrics:active_jobs", str(active))
         except Exception as e:
             logger.error(f"Metrics collector error: {e}")
 
-# ====== Utils ======
+# -----------------------------
+# Utilities
+# -----------------------------
 def calculate_eta(job: Dict[str, Any]) -> Optional[str]:
     if job.get("status") != "running" or job.get("progress", 0) == 0:
         return None
@@ -1010,7 +1035,72 @@ def calculate_eta(job: Dict[str, Any]) -> Optional[str]:
     remaining = total_est - elapsed
     return (datetime.utcnow() + timedelta(seconds=remaining)).isoformat()
 
-# ====== Local entry (not used on Railway if you run as module) ======
+# =====================================================================
+# GUI mounting (IMPORTANT: last, so it does NOT intercept /api/*)
+# =====================================================================
+from fastapi.responses import HTMLResponse  # noqa: E402
+
+GUI_BUNDLE_DIR_ENV = os.getenv("GUI_BUNDLE_DIR", "").strip()
+CANDIDATES: List[Path] = []
+if GUI_BUNDLE_DIR_ENV:
+    CANDIDATES.append(Path(GUI_BUNDLE_DIR_ENV))
+repo_root = Path(__file__).resolve().parents[1]
+CANDIDATES += [
+    repo_root / "ode_gui_bundle",
+    repo_root / "ode_gui_bundle" / "dist",
+    repo_root / "ode_gui_bundle" / "build",
+    repo_root / "gui" / "gui" / "dist",
+]
+BUNDLE_DIR: Optional[Path] = None
+for root in CANDIDATES:
+    if (root / "index.html").exists():
+        BUNDLE_DIR = root
+        break
+
+if BUNDLE_DIR:
+    logger.info(f"Serving GUI from: {BUNDLE_DIR}")
+
+    @app.get("/config.js", include_in_schema=False)
+    async def config_js():
+        api_base = os.getenv("PUBLIC_API_BASE", "")  # e.g., "https://ode-api.up.railway.app"
+        api_key = os.getenv("PUBLIC_API_KEY", "")    # expose only if intentionally public
+        ws_enabled = os.getenv("ENABLE_WEBSOCKET", "true").lower() == "true"
+        content = "window.ODE_CONFIG=" + json.dumps({"API_BASE": api_base, "API_KEY": api_key, "WS": ws_enabled}) + ";"
+        return Response(content, media_type="application/javascript")
+
+    assets_dir = BUNDLE_DIR / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+    else:
+        logger.warning("GUI found but no assets/ folder. If index.html references /assets/*, those will 404.")
+
+    # Mount SPA at root with HTML fallback (no manual catch-all route)
+    app.mount("/", StaticFiles(directory=BUNDLE_DIR, html=True), name="ui")
+
+else:
+    logger.warning(
+        "GUI bundle not found. Looked in:\n  - " + "\n  - ".join(str(p) for p in CANDIDATES) +
+        "\nSet GUI_BUNDLE_DIR env var to the folder containing index.html."
+    )
+
+    @app.get("/", include_in_schema=False)
+    async def root_info():
+        return {
+            "name": "ODE Master Generators API",
+            "version": "3.0.0",
+            "status": "operational",
+            "environment": ENVIRONMENT,
+            "features": {
+                "core": CORE_IMPORTS_AVAILABLE,
+                "ml": ML_AVAILABLE,
+                "redis": REDIS_AVAILABLE,
+                "websocket": ENABLE_WEBSOCKET,
+            },
+        }
+
+# -----------------------------
+# Local entry point
+# -----------------------------
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info" if ENVIRONMENT == "production" else "debug")
