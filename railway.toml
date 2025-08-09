@@ -1,9 +1,12 @@
 [build]
 buildCommand = """
+    echo "Installing Python dependencies..." && \
     pip install -r requirements.txt && \
+    echo "Building React GUI..." && \
     cd ode_gui_bundle && \
     npm install && \
     npm run build && \
+    echo "GUI build complete!" && \
     cd ..
 """
 
