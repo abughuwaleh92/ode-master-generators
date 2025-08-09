@@ -1,12 +1,13 @@
-# Dockerfile - Unified Dockerfile for both API and GUI
-# Uses build arguments to determine which service to build
+# Dockerfile - Working version for Railway deployment
+# This is a unified Dockerfile that can build both API and GUI
+# Use --build-arg SERVICE=api or SERVICE=gui to select
 
-ARG SERVICE_TYPE=api
+ARG SERVICE=api
 
 # ============================================
-# API Build Stage
+# API Build
 # ============================================
-FROM python:3.11-slim AS api-build
+FROM python:3.11-slim AS api
 
 WORKDIR /app
 
@@ -29,13 +30,26 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p data models ml_data logs
 
-# Set Python path
+# Set environment variables
 ENV PYTHONPATH=/app:$PYTHONPATH
+ENV PORT=8080
+ENV ENVIRONMENT=production
+ENV PYTHONUNBUFFERED=1
+
+# Expose port
+EXPOSE ${PORT}
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:${PORT}/health || exit 1
+
+# Run command
+CMD ["python", "scripts/production_server.py"]
 
 # ============================================
-# GUI Build Stage
+# GUI Build
 # ============================================
-FROM node:18-alpine AS gui-build
+FROM node:18-alpine AS gui-builder
 
 WORKDIR /app
 
@@ -52,73 +66,54 @@ COPY ode_gui_bundle/ .
 RUN npm run build
 
 # ============================================
-# GUI Runtime Stage
+# GUI Runtime
 # ============================================
-FROM nginx:alpine AS gui-runtime
+FROM nginx:alpine AS gui
 
-# Copy built files from gui-build stage
-COPY --from=gui-build /app/dist /usr/share/nginx/html
+# Copy built files from builder
+COPY --from=gui-builder /app/dist /usr/share/nginx/html
 
-# Create nginx config
-RUN cat > /etc/nginx/conf.d/default.conf << 'EOF'
-server {
-    listen 80;
-    server_name localhost;
-    root /usr/share/nginx/html;
-    index index.html;
+# Create nginx configuration using echo commands (Docker-safe)
+RUN echo 'server {' > /etc/nginx/conf.d/default.conf && \
+    echo '    listen 80;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    server_name localhost;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    root /usr/share/nginx/html;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    index index.html;' >> /etc/nginx/conf.d/default.conf && \
+    echo '' >> /etc/nginx/conf.d/default.conf && \
+    echo '    gzip on;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    gzip_types text/plain text/css text/xml text/javascript application/javascript application/json;' >> /etc/nginx/conf.d/default.conf && \
+    echo '' >> /etc/nginx/conf.d/default.conf && \
+    echo '    location /assets/ {' >> /etc/nginx/conf.d/default.conf && \
+    echo '        expires 1y;' >> /etc/nginx/conf.d/default.conf && \
+    echo '        add_header Cache-Control "public, immutable";' >> /etc/nginx/conf.d/default.conf && \
+    echo '    }' >> /etc/nginx/conf.d/default.conf && \
+    echo '' >> /etc/nginx/conf.d/default.conf && \
+    echo '    location /config.js {' >> /etc/nginx/conf.d/default.conf && \
+    echo '        add_header Cache-Control "no-store, no-cache, must-revalidate";' >> /etc/nginx/conf.d/default.conf && \
+    echo '    }' >> /etc/nginx/conf.d/default.conf && \
+    echo '' >> /etc/nginx/conf.d/default.conf && \
+    echo '    location / {' >> /etc/nginx/conf.d/default.conf && \
+    echo '        try_files $uri $uri/ /index.html;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    }' >> /etc/nginx/conf.d/default.conf && \
+    echo '}' >> /etc/nginx/conf.d/default.conf
 
-    gzip on;
-    gzip_types text/plain text/css text/xml text/javascript application/javascript application/json;
+# Create entrypoint script using echo commands
+RUN echo '#!/bin/sh' > /docker-entrypoint.sh && \
+    echo 'cat > /usr/share/nginx/html/config.js << EOJS' >> /docker-entrypoint.sh && \
+    echo 'window.ODE_CONFIG = {' >> /docker-entrypoint.sh && \
+    echo '  API_BASE: "'${API_BASE:-}'",' >> /docker-entrypoint.sh && \
+    echo '  API_KEY: "'${API_KEY:-}'",' >> /docker-entrypoint.sh && \
+    echo '  WS: '${ENABLE_WEBSOCKET:-true} >> /docker-entrypoint.sh && \
+    echo '};' >> /docker-entrypoint.sh && \
+    echo 'EOJS' >> /docker-entrypoint.sh && \
+    echo 'nginx -g "daemon off;"' >> /docker-entrypoint.sh && \
+    chmod +x /docker-entrypoint.sh
 
-    location /assets/ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
-    location /config.js {
-        add_header Cache-Control "no-store, no-cache, must-revalidate";
-    }
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
-EOF
-
-# Create runtime config script
-RUN cat > /docker-entrypoint.sh << 'EOF'
-#!/bin/sh
-cat > /usr/share/nginx/html/config.js << EOJS
-window.ODE_CONFIG = {
-  API_BASE: '${API_BASE:-}',
-  API_KEY: '${API_KEY:-}',
-  WS: ${ENABLE_WEBSOCKET:-true}
-};
-EOJS
-nginx -g 'daemon off;'
-EOF
-
-RUN chmod +x /docker-entrypoint.sh
-
-# ============================================
-# Final Stage Selection
-# ============================================
-FROM ${SERVICE_TYPE}-${SERVICE_TYPE == 'api' ? 'build' : 'runtime'} AS final
-
-# API-specific configuration
-FROM api-build AS api-final
-ENV PORT=8080
-ENV ENVIRONMENT=production
-ENV PYTHONUNBUFFERED=1
-EXPOSE ${PORT}
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:${PORT}/health || exit 1
-CMD ["python", "scripts/production_server.py"]
-
-# GUI-specific configuration
-FROM gui-runtime AS gui-final
 EXPOSE 80
+
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
-# Select final image based on SERVICE_TYPE
-FROM ${SERVICE_TYPE}-final
+# ============================================
+# Final stage selection based on SERVICE arg
+# ============================================
+FROM ${SERVICE} AS final
