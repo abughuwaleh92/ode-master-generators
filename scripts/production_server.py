@@ -1,8 +1,10 @@
 """
 Production FastAPI server for ODE Master Generators
 - Starts fast and reliably on Railway
-- API routes are registered BEFORE the SPA fallback (prevents HTML intercepts)
-- Optional PUBLIC_READ for /api/generators and /api/functions
+- Single FastAPI app instance
+- Single explicit CORS policy driven by ALLOWED_ORIGINS
+- API-key auth with optional PUBLIC_READ for safe GETs
+- SPA GUI mounted AFTER API routes, with runtime /config.js
 """
 
 import os
@@ -12,18 +14,21 @@ import time
 import uuid
 import asyncio
 import traceback
+import logging
+from enum import Enum
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set
-from enum import Enum
-import logging
 from contextlib import asynccontextmanager
 from collections import defaultdict, deque
 
 import numpy as np
 import pandas as pd
 import sympy as sp
-from fastapi import FastAPI, HTTPException, Depends, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI, HTTPException, Depends, Request, Response,
+    WebSocket, WebSocketDisconnect
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -32,38 +37,20 @@ from pydantic import BaseModel, Field, ConfigDict
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
 
 # ---------------- Environment / logging ----------------
-# ALLOWED_ORIGINS=https://ode-gui.up.railway.app,http://localhost:3000
-ALLOWED_ORIGINS = [
-    o.strip() for o in os.getenv("ALLOWED_ORIGINS", "https://ode-gui.up.railway.app").split(",")
-    if o.strip()
-]
-
-# ---------------- App ----------------
-app = FastAPI(
-    title="ODE Master Generators API",
-    description="ODE generation, verification, datasets, jobs, ML",
-    version="3.1.0",
-    lifespan=lifespan,
-)
-
-# ✅ Single, explicit CORS block (after app is created)
-from fastapi.middleware.cors import CORSMiddleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,           # no "*"
-    allow_credentials=False,                 # set True only if you actually use cookies
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-    allow_headers=["X-API-Key", "Content-Type", "Authorization"],
-    expose_headers=["Content-Disposition"],
-    max_age=3600,
-)
-
 PORT = int(os.getenv("PORT", "8080"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-API_KEYS = [k.strip() for k in os.getenv("API_KEYS", "dev-key,railway-key").split(",") if k.strip()]
+API_KEYS = [k.strip() for k in os.getenv("API_KEYS", "railway-key").split(",") if k.strip()]
 ENVIRONMENT = os.getenv("RAILWAY_ENVIRONMENT", "development")
 ENABLE_WEBSOCKET = os.getenv("ENABLE_WEBSOCKET", "true").lower() == "true"
 PUBLIC_READ = os.getenv("PUBLIC_READ", "false").lower() == "true"
+
+# GUI <-> API CORS
+# Example: ALLOWED_ORIGINS="https://ode-gui.up.railway.app,http://localhost:3000"
+ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv("ALLOWED_ORIGINS", "https://ode-gui.up.railway.app").split(",")
+    if o.strip()
+]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 log = logging.getLogger("production_server")
@@ -72,6 +59,7 @@ log = logging.getLogger("production_server")
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ---------------- Optional project imports (with fallbacks) ----------------
+CORE_OK = True
 try:
     from pipeline.generator import ODEDatasetGenerator
     from verification.verifier import ODEVerifier
@@ -79,11 +67,9 @@ try:
     from utils.features import FeatureExtractor
     from core.types import GeneratorType, VerificationMethod, ODEInstance
     from core.functions import AnalyticFunctionLibrary
-    CORE_OK = True
 except Exception as e:
-    log.warning(f"Core imports not available: {e}")
-
     CORE_OK = False
+    log.warning(f"Core imports not available: {e}")
 
     class GeneratorType(Enum):
         LINEAR = "linear"
@@ -96,18 +82,20 @@ except Exception as e:
         PENDING = "pending"
 
 # ML (optional)
+ML_OK = True
 try:
-    import torch  # noqa
-    from ml_pipeline.train_ode_generator import ODEGeneratorTrainer  # noqa
-    from ml_pipeline.utils import prepare_ml_dataset, load_pretrained_model, generate_novel_odes  # noqa
-    ML_OK = True
+    import torch  # noqa: F401
+    from ml_pipeline.train_ode_generator import ODEGeneratorTrainer  # noqa: F401
+    from ml_pipeline.utils import (  # noqa: F401
+        prepare_ml_dataset, load_pretrained_model, generate_novel_odes
+    )
 except Exception as e:
     ML_OK = False
     log.warning(f"ML pipeline not available: {e}")
 
 # ---------------- Cache (Redis with fallback) ----------------
 try:
-    import redis  # noqa
+    import redis  # type: ignore
 
     if REDIS_URL.startswith(("redis://", "rediss://")):
         _redis = redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=3)
@@ -117,7 +105,6 @@ try:
         raise ValueError("Invalid Redis URL")
 except Exception as e:
     log.warning(f"Redis not available ({e}); using in-memory cache")
-
     REDIS_OK = False
 
     class MemCache:
@@ -435,7 +422,7 @@ async def lifespan(app: FastAPI):
     yield
     log.info("Shutting down...")
 
-# ---------------- App ----------------
+# ---------------- App (single instance) ----------------
 app = FastAPI(
     title="ODE Master Generators API",
     description="ODE generation, verification, datasets, jobs, ML",
@@ -443,13 +430,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
+# ---------------- Single, explicit CORS block ----------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten in production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,            # explicit; no wildcard
+    allow_credentials=False,                  # True only if you use cookies
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["X-API-Key", "x-api-key", "Content-Type", "Authorization"],
+    expose_headers=["Content-Disposition"],
+    max_age=3600,
 )
 
 # ---------------- Security helpers ----------------
@@ -469,14 +458,18 @@ async def metrics_mw(request: Request, call_next):
     t0 = time.time()
     response = await call_next(request)
     dt = time.time() - t0
-    api_request_counter.labels(endpoint=request.url.path, method=request.method, status=response.status_code).inc()
-    api_request_duration.labels(endpoint=request.url.path).observe(dt)
+    try:
+        api_request_counter.labels(
+            endpoint=request.url.path, method=request.method, status=response.status_code
+        ).inc()
+        api_request_duration.labels(endpoint=request.url.path).observe(dt)
+    except Exception:
+        pass
     return response
 
 # ---------------- Health / metrics / info ----------------
 @app.get("/health", response_class=PlainTextResponse)
 async def health():
-    # Do not block: return quickly to keep Railway happy
     return "ok"
 
 @app.get("/metrics")
@@ -509,7 +502,9 @@ async def api_functions(_: str = Depends(require_key_or_public_read)):
     s = app.state.ode
     return {"functions": s.functions(), "count": len(s.functions())}
 
-class _GenReq(ODEGenerationRequest): ...
+class _GenReq(ODEGenerationRequest):
+    pass
+
 @app.post("/api/generate")
 async def api_generate(req: _GenReq, _: str = Depends(require_key_or_public_read)):
     s = app.state.ode
@@ -793,11 +788,14 @@ if GUI_DIR_ENV:
     _c = Path(GUI_DIR_ENV)
     if (_c / "index.html").exists():
         _candidates.append(_c)
+
 repo_root = Path(__file__).resolve().parents[1]
-for p in (repo_root / "ode_gui_bundle",
-          repo_root / "ode_gui_bundle" / "dist",
-          repo_root / "ode_gui_bundle" / "build",
-          repo_root / "gui" / "gui" / "dist"):
+for p in (
+    repo_root / "ode_gui_bundle",
+    repo_root / "ode_gui_bundle" / "dist",
+    repo_root / "ode_gui_bundle" / "build",
+    repo_root / "gui" / "gui" / "dist"
+):
     if (p / "index.html").exists():
         _candidates.append(p)
 
@@ -811,12 +809,17 @@ if _GUI:
 
     @app.get("/config.js")
     async def config_js():
+        # Provide runtime config to the SPA
         content = "window.ODE_CONFIG=" + json.dumps({
-            "API_BASE": os.getenv("PUBLIC_API_BASE", ""),  # leave blank to use window.location.origin
-            "API_KEY": os.getenv("PUBLIC_API_KEY", ""),    # only if intentionally public
+            "API_BASE": os.getenv("PUBLIC_API_BASE", ""),  # blank -> use window.location.origin
+            "API_KEY": os.getenv("PUBLIC_API_KEY", ""),    # supply only if intentionally public
             "WS": ENABLE_WEBSOCKET
         }) + ";"
-        return Response(content, media_type="application/javascript")
+        return Response(
+            content,
+            media_type="application/javascript",
+            headers={"Cache-Control": "no-store, max-age=0"}
+        )
 
     @app.get("/", response_class=HTMLResponse)
     async def spa_root():
