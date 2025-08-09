@@ -1,0 +1,57 @@
+# Dockerfile.gui - ODE Master Generators GUI
+FROM node:18-alpine AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY ode_gui_bundle/package*.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy the rest of the application
+COPY ode_gui_bundle/ .
+
+# Build the application
+RUN npm run build
+
+# Production stage
+FROM nginx:alpine
+
+# Copy built files from builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Copy nginx configuration
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Create runtime config script
+RUN cat > /usr/share/nginx/html/config.js << 'EOF'
+window.ODE_CONFIG = {
+  API_BASE: window.ODE_API_BASE || '',
+  API_KEY: window.ODE_API_KEY || '',
+  WS: window.ODE_WS !== 'false'
+};
+EOF
+
+# Create entrypoint script for runtime config injection
+RUN cat > /docker-entrypoint.sh << 'EOF'
+#!/bin/sh
+# Update config.js with environment variables
+cat > /usr/share/nginx/html/config.js << EOJS
+window.ODE_CONFIG = {
+  API_BASE: '${API_BASE:-}',
+  API_KEY: '${API_KEY:-}',
+  WS: ${ENABLE_WEBSOCKET:-true}
+};
+EOJS
+
+# Start nginx
+nginx -g 'daemon off;'
+EOF
+
+RUN chmod +x /docker-entrypoint.sh
+
+EXPOSE 80
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
