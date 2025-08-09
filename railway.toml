@@ -1,23 +1,22 @@
+ railway.toml - Choose one builder option
+
+# OPTION 1: Use Nixpacks (comment out to use Docker)
 [build]
 builder = "nixpacks"
+
+# OPTION 2: Use Dockerfile (uncomment to use Docker instead)
+# [build]
+# builder = "dockerfile"
+# dockerfilePath = "Dockerfile"
 
 [deploy]
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "always"
 
-# Environment variables
 [deploy.env]
 ENVIRONMENT = "production"
-ENABLE_WEBSOCKET = "true"
+ENABLE_WEBSOCKET = "true" 
 PUBLIC_READ = "true"
 PORT = "8080"
-
-# GUI bundle directory (where the built React app is located)
-GUI_BUNDLE_DIR = "ode_gui_bundle"
-
-# API configuration
-ALLOWED_ORIGINS = "https://${{RAILWAY_STATIC_URL}},https://${{RAILWAY_PUBLIC_DOMAIN}}"
-
-# Optional: if you want to use a custom domain
-# ALLOWED_ORIGINS = "https://your-custom-domain.com,https://${{RAILWAY_PUBLIC_DOMAIN}}"
+GUI_BUNDLE_DIR = "ode_gui_bundle/dist"
