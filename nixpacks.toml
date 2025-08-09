@@ -3,8 +3,6 @@ nixPkgs = ["python311", "nodejs_18", "gcc"]
 
 [phases.install]
 cmds = [
-    "python --version",
-    "pip install --upgrade pip setuptools wheel",
     "pip install -r requirements.txt",
     "cd ode_gui_bundle && npm install && npm run build && cd .."
 ]
