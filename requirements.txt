@@ -1,134 +1,36 @@
-# requirements.txt
-# Complete requirements for ODE Master Generator System
-# Covers API server, GUI, and all dependencies
+# Core dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+python-multipart==0.0.6
 
-# ============================================
-# Core Scientific Computing
-# ============================================
+# Scientific computing
 numpy==1.24.3
 pandas==2.0.3
 sympy==1.12
-scipy==1.11.1
+scipy==1.11.4
 
-# ============================================
-# Machine Learning & Deep Learning
-# ============================================
-# PyTorch (CPU version for Railway deployment)
---find-links https://download.pytorch.org/whl/torch_stable.html
-torch==2.0.1+cpu
-torchvision==0.15.2+cpu
-
-# For GPU support, comment above and uncomment below:
-# torch==2.0.1
-# torchvision==0.15.2
-
-# Transformers and ML utilities
-transformers==4.31.0
-safetensors==0.3.1
-scikit-learn==1.3.0
-joblib==1.3.1
-
-# ============================================
-# Web Framework & API
-# ============================================
-fastapi==0.100.0
-uvicorn[standard]==0.23.1
-pydantic==2.1.1
-python-multipart==0.0.6
-aiofiles==23.1.0
-requests==2.31.0
-aiohttp==3.8.5
-asyncio-throttle==1.0.2
-
-# ============================================
-# Streamlit GUI
-# ============================================
-streamlit==1.25.0
-streamlit-option-menu==0.3.6
-streamlit-aggrid==0.3.4
-
-# ============================================
-# Data Processing & Storage
-# ============================================
-pyarrow==12.0.1
-openpyxl==3.1.2
-dill==0.3.7
-h5py==3.9.0
-
-# ============================================
-# Visualization
-# ============================================
-matplotlib==3.7.2
-seaborn==0.12.2
-plotly==5.15.0
-wordcloud==1.9.2
-altair==5.0.1
-
-# ============================================
-# Database & Caching
-# ============================================
-redis==4.6.0
-# For Railway deployment, redis is provided as a service
-
-# ============================================
-# Monitoring & Metrics
-# ============================================
-prometheus-client==0.17.1
-psutil==5.9.5
-
-# ============================================
-# Configuration & Utilities
-# ============================================
+# Data handling
 pyyaml==6.0.1
+pyarrow==14.0.1
+
+# Web and API
+httpx==0.25.1
+websockets==12.0
+prometheus-client==0.19.0
+
+# Caching (optional, falls back to in-memory)
+redis==5.0.1
+
+# Machine Learning (optional)
+torch>=2.0.0
+scikit-learn==1.3.2
+matplotlib==3.7.2
+seaborn==0.13.0
+
+# Utilities
+tqdm==4.66.1
 python-dotenv==1.0.0
-tqdm==4.65.0
-click==8.1.6
 
-# ============================================
-# Network Analysis
-# ============================================
-networkx==3.1
-
-# ============================================
-# Testing (optional for production)
-# ============================================
-pytest==7.4.0
-pytest-asyncio==0.21.1
-hypothesis==6.82.0
-
-# ============================================
-# Additional Dependencies
-# ============================================
-# File handling
-python-magic==0.4.27
-watchdog==3.0.0
-
-# Async support
-anyio==3.7.1
-
-# Security
-cryptography==41.0.3
-python-jose[cryptography]==3.3.0
-
-# Deployment
+# Production server
 gunicorn==21.2.0
-jinja2 
-# ============================================
-# Railway-specific optimizations
-# ============================================
-# Use CPU-only versions to reduce slug size
-# Already specified torch+cpu above
-
-# ============================================
-# Optional ML accelerators (comment out for basic deployment)
-# ============================================
-# accelerate==0.21.0
-# optimum==1.11.0
-
-# ============================================
-# Development tools (optional)
-# ============================================
-# black==23.7.0
-# flake8==6.1.0
-# mypy==1.5.0
-# ipython==8.14.0
