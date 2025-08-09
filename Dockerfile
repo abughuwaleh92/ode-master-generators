@@ -104,4 +104,4 @@ EXPOSE 8080
 
 # Use Uvicorn to run the FastAPI app inside the container
 # replace the previous CMD with this:
-CMD ["sh", "-c", "uvicorn scripts.production_server:app --host 0.0.0.0 --port ${PORT:-8080} --lifespan on --workers 1"]
+CMD ["python", "-m", "scripts.production_server"]
