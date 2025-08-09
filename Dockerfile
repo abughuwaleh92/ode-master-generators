@@ -2,37 +2,37 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install Node.js and npm
 RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
     nodejs \
     npm \
+    gcc \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Copy and install Python requirements
 COPY requirements.txt .
-COPY requirements-gui.txt* ./
+RUN pip install -r requirements.txt
 
-# Install Python dependencies
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install -r requirements.txt
-
-# If you have requirements-gui.txt, install it too
-# RUN if [ -f requirements-gui.txt ]; then pip install -r requirements-gui.txt; fi
-
-# Copy and build GUI
+# Copy GUI source and build it
 COPY ode_gui_bundle/package*.json ./ode_gui_bundle/
-RUN cd ode_gui_bundle && npm install
+WORKDIR /app/ode_gui_bundle
+RUN npm install
 
-COPY ode_gui_bundle ./ode_gui_bundle
-RUN cd ode_gui_bundle && npm run build
+COPY ode_gui_bundle/ ./
+RUN npm run build && \
+    echo "Contents of dist after build:" && \
+    ls -la dist/
 
 # Copy the rest of the application
+WORKDIR /app
 COPY . .
 
-# Expose port (Railway sets PORT env variable)
+# Verify GUI was built
+RUN echo "Checking GUI build..." && \
+    ls -la ode_gui_bundle/ && \
+    ls -la ode_gui_bundle/dist/ || echo "dist directory not found!"
+
 EXPOSE 8080
 
-# Start application
 CMD ["python", "scripts/production_server.py"]
