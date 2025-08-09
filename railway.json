@@ -1,22 +1,13 @@
+## 1. railway.json (Project Root)
+```json
 {
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS",
-    "buildCommand": "pip install -r requirements.txt"
+    "builder": "NIXPACKS"
   },
   "deploy": {
     "numReplicas": 1,
-    "startCommand": "uvicorn scripts.production_server:app --host 0.0.0.0 --port $PORT --lifespan on --workers 1",
-    "healthcheckPath": "/health",
-    "healthcheckTimeout": 30,
     "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 3
-  },
-  "environmentVariables": {
-    "ENABLE_WEBSOCKET": "true",
-    "PUBLIC_READ": "true",
-    "NIXPACKS_PYTHON_VERSION": "3.11",
-    "API_KEYS": "railway-key,dev-key",
-    "ALLOWED_ORIGINS": "https://ode-gui.up.railway.app,http://localhost:3000"
+    "restartPolicyMaxRetries": 10
   }
 }
