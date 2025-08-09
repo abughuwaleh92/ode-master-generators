@@ -3,27 +3,21 @@ builder = "nixpacks"
 
 [deploy]
 healthcheckPath = "/health"
-healthcheckTimeout = 10
+healthcheckTimeout = 300
 restartPolicyType = "always"
 
-# API Service Configuration
-[[services]]
-name = "ode-api"
-source = "./api"  # Point to your API source directory
-[services.build]
-builder = "nixpacks"
-[services.env]
+# Environment variables
+[deploy.env]
 ENVIRONMENT = "production"
 ENABLE_WEBSOCKET = "true"
-PUBLIC_READ = "false"
-ALLOWED_ORIGINS = "https://${{RAILWAY_STATIC_URL}}"
+PUBLIC_READ = "true"
+PORT = "8080"
 
-# GUI Service Configuration  
-[[services]]
-name = "ode-gui"
-source = "./gui"  # Point to your GUI source directory
-[services.build]
-builder = "nixpacks"
-[services.env]
-API_BASE = "https://${{RAILWAY_SERVICE_ODE_API_URL}}"
-ENABLE_WEBSOCKET = "true"
+# GUI bundle directory (where the built React app is located)
+GUI_BUNDLE_DIR = "ode_gui_bundle"
+
+# API configuration
+ALLOWED_ORIGINS = "https://${{RAILWAY_STATIC_URL}},https://${{RAILWAY_PUBLIC_DOMAIN}}"
+
+# Optional: if you want to use a custom domain
+# ALLOWED_ORIGINS = "https://your-custom-domain.com,https://${{RAILWAY_PUBLIC_DOMAIN}}"
