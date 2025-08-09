@@ -1,22 +1,7 @@
- railway.toml - Choose one builder option
-
-# OPTION 1: Use Nixpacks (comment out to use Docker)
 [build]
 builder = "nixpacks"
-
-# OPTION 2: Use Dockerfile (uncomment to use Docker instead)
-# [build]
-# builder = "dockerfile"
-# dockerfilePath = "Dockerfile"
 
 [deploy]
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "always"
-
-[deploy.env]
-ENVIRONMENT = "production"
-ENABLE_WEBSOCKET = "true" 
-PUBLIC_READ = "true"
-PORT = "8080"
-GUI_BUNDLE_DIR = "ode_gui_bundle/dist"
