@@ -38,15 +38,26 @@ ALLOWED_ORIGINS = [
     if o.strip()
 ]
 
+# ---------------- App ----------------
+app = FastAPI(
+    title="ODE Master Generators API",
+    description="ODE generation, verification, datasets, jobs, ML",
+    version="3.1.0",
+    lifespan=lifespan,
+)
+
+# ✅ Single, explicit CORS block (after app is created)
+from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,        # <-- no "*"
-    allow_credentials=True,               # keep if you plan to use cookies; otherwise set False
+    allow_origins=ALLOWED_ORIGINS,           # no "*"
+    allow_credentials=False,                 # set True only if you actually use cookies
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["X-API-Key", "Content-Type", "Authorization"],
-    expose_headers=["Content-Disposition"],  # helpful for file downloads
+    expose_headers=["Content-Disposition"],
     max_age=3600,
 )
+
 PORT = int(os.getenv("PORT", "8080"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 API_KEYS = [k.strip() for k in os.getenv("API_KEYS", "dev-key,railway-key").split(",") if k.strip()]
