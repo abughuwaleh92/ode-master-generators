@@ -1,1162 +1,812 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ODE Master Generators - Complete System Interface</title>
-    
-    <!-- External Libraries -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.6.2/axios.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-    
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ODE Master Generators — Control Panel</title>
 
-        :root {
-            --primary: #2563eb;
-            --primary-dark: #1e40af;
-            --secondary: #10b981;
-            --danger: #ef4444;
-            --warning: #f59e0b;
-            --dark: #1f2937;
-            --light: #f3f4f6;
-            --border: #e5e7eb;
-            --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-            --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.1);
-        }
+  <!-- Optional runtime config from your FastAPI server -->
+  <!-- If present, it sets window.ODE_CONFIG = { API_BASE, API_KEY, WS } -->
+  <script src="/config.js"></script>
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            color: var(--dark);
-        }
+  <!-- React + Babel + libs (no build step required) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.6.8/axios.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.min.js" async crossorigin="anonymous"></script>
 
-        .app-container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        .header {
-            background: white;
-            border-radius: 12px;
-            padding: 24px;
-            margin-bottom: 24px;
-            box-shadow: var(--shadow-lg);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 16px;
-        }
-
-        .header h1 {
-            font-size: 28px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            font-weight: bold;
-        }
-
-        .status-bar {
-            display: flex;
-            gap: 16px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 6px 12px;
-            background: var(--light);
-            border-radius: 20px;
-            font-size: 14px;
-        }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        .main-content {
-            display: grid;
-            grid-template-columns: 250px 1fr;
-            gap: 24px;
-        }
-
-        .sidebar {
-            background: white;
-            border-radius: 12px;
-            padding: 20px;
-            box-shadow: var(--shadow-lg);
-            height: fit-content;
-            position: sticky;
-            top: 20px;
-        }
-
-        .nav-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px 16px;
-            margin-bottom: 8px;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-weight: 500;
-        }
-
-        .nav-item:hover {
-            background: var(--light);
-        }
-
-        .nav-item.active {
-            background: var(--primary);
-            color: white;
-        }
-
-        .content-panel {
-            background: white;
-            border-radius: 12px;
-            padding: 24px;
-            box-shadow: var(--shadow-lg);
-            min-height: 600px;
-        }
-
-        .form-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 24px;
-        }
-
-        .form-group {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .form-label {
-            font-weight: 500;
-            font-size: 14px;
-            color: var(--dark);
-        }
-
-        .form-input, .form-select {
-            padding: 10px 14px;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            font-size: 14px;
-            transition: all 0.2s;
-        }
-
-        .form-input:focus, .form-select:focus {
-            outline: none;
-            border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-        }
-
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 8px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .btn-primary {
-            background: var(--primary);
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: var(--primary-dark);
-            transform: translateY(-1px);
-            box-shadow: var(--shadow-lg);
-        }
-
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .results-container {
-            margin-top: 24px;
-            padding: 20px;
-            background: var(--light);
-            border-radius: 8px;
-        }
-
-        .result-card {
-            background: white;
-            padding: 16px;
-            border-radius: 8px;
-            margin-bottom: 16px;
-            border: 1px solid var(--border);
-        }
-
-        .result-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 12px;
-        }
-
-        .result-badge {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-
-        .badge-success {
-            background: rgba(16, 185, 129, 0.1);
-            color: var(--secondary);
-        }
-
-        .badge-error {
-            background: rgba(239, 68, 68, 0.1);
-            color: var(--danger);
-        }
-
-        .math-display {
-            padding: 16px;
-            background: #f9fafb;
-            border-radius: 8px;
-            overflow-x: auto;
-            margin: 12px 0;
-            font-family: 'Courier New', monospace;
-        }
-
-        .error-message {
-            padding: 12px;
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.2);
-            border-radius: 8px;
-            color: var(--danger);
-            margin: 16px 0;
-        }
-
-        .success-message {
-            padding: 12px;
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid rgba(16, 185, 129, 0.2);
-            border-radius: 8px;
-            color: var(--secondary);
-            margin: 16px 0;
-        }
-
-        .loading-spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid var(--light);
-            border-top-color: var(--primary);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .config-section {
-            background: #f9fafb;
-            padding: 16px;
-            border-radius: 8px;
-            margin-bottom: 24px;
-        }
-
-        .config-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 8px;
-        }
-
-        @media (max-width: 768px) {
-            .main-content {
-                grid-template-columns: 1fr;
-            }
-            
-            .sidebar {
-                position: static;
-            }
-        }
-    </style>
+  <style>
+    :root{
+      --primary:#2563eb;--primary-600:#1e40af;--ok:#10b981;--bad:#ef4444;--warn:#f59e0b;
+      --bg:#0f172a;--card:#fff;--muted:#6b7280;--soft:#f3f4f6;--border:#e5e7eb;
+      --shadow:0 10px 25px rgba(0,0,0,.08);
+    }
+    *{box-sizing:border-box} body{margin:0;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh}
+    .app{max-width:1400px;margin:0 auto;padding:20px}
+    .header{background:#fff;border-radius:14px;padding:18px 20px;margin-bottom:20px;box-shadow:var(--shadow);display:flex;gap:16px;align-items:center;justify-content:space-between}
+    .brand{display:flex;align-items:center;gap:10px}
+    .brand h1{font-size:22px;margin:0;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .status{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .pill{display:flex;align-items:center;gap:6px;background:var(--soft);border:1px solid var(--border);border-radius:999px;padding:6px 10px;font-size:13px}
+    .dot{width:8px;height:8px;border-radius:999px;background:var(--ok)}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:none;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer}
+    .btn.primary{background:var(--primary);color:#fff}.btn.primary:hover{background:var(--primary-600)}
+    .btn.ghost{background:#fff;border:1px solid var(--border)}
+    .layout{display:grid;grid-template-columns:250px 1fr;gap:20px}
+    .side{position:sticky;top:20px;align-self:start;background:#fff;border-radius:14px;padding:14px;box-shadow:var(--shadow)}
+    .nav .item{display:flex;align-items:center;gap:10px;padding:12px;border-radius:10px;font-weight:600;color:#111;cursor:pointer}
+    .nav .item:hover{background:var(--soft)} .nav .item.active{background:var(--primary);color:#fff}
+    .panel{background:#fff;border-radius:14px;padding:18px 18px;box-shadow:var(--shadow);min-height:600px}
+    .tabs{display:flex;gap:18px;border-bottom:2px solid var(--border);margin-bottom:16px}
+    .tab{background:none;border:none;padding:12px 0;font-weight:700;color:#111;cursor:pointer}
+    .tab.active{color:var(--primary);position:relative}
+    .tab.active::after{content:"";position:absolute;left:0;right:0;bottom:-2px;height:2px;background:var(--primary)}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+    .group{display:flex;flex-direction:column;gap:6px}
+    .label{font-weight:700;font-size:13px;color:#111}
+    .input,.select,textarea{width:100%;border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:14px}
+    .muted{color:var(--muted)} .error{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);color:#b91c1c;border-radius:10px;padding:10px 12px}
+    .success{background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.25);color:#065f46;border-radius:10px;padding:10px 12px}
+    .results{margin-top:16px;background:#fafafa;border:1px solid var(--border);border-radius:12px;padding:14px}
+    .card{background:#fff;border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px}
+    .row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+    .badge{font-size:12px;border-radius:6px;padding:4px 8px;font-weight:700}
+    .ok{background:rgba(16,185,129,.1);color:#047857}.bad{background:rgba(239,68,68,.1);color:#b91c1c}
+    .code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:10px;overflow:auto}
+    .jobs{display:flex;flex-direction:column;gap:10px}
+    .job{display:flex;justify-content:space-between;align-items:center;gap:12px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:12px}
+    .bar{width:200px;height:8px;background:#eef2ff;border-radius:6px;overflow:hidden}
+    .fill{height:100%;background:var(--primary);transition:width .25s}
+    @media (max-width: 900px){.layout{grid-template-columns:1fr}}
+  </style>
 </head>
 <body>
-    <div id="root"></div>
+  <div id="root"></div>
 
-    <script type="text/babel">
-        const { useState, useEffect, useRef, useCallback } = React;
+  <script type="text/babel">
+    const {useEffect,useRef,useState,useMemo,useCallback} = React;
 
-        // Main App Component
-        function App() {
-            const [activeView, setActiveView] = useState('generator');
-            const [systemStatus, setSystemStatus] = useState('checking');
-            const [apiConfig, setApiConfig] = useState({
-                baseURL: '',
-                apiKey: 'dev-key'
-            });
-            const [isConfigured, setIsConfigured] = useState(false);
+    // ---------- Configuration loader ----------
+    function loadInitialSettings() {
+      // 1) server-provided config.js
+      const fromServer = (window.ODE_CONFIG || {});
+      // 2) local saved settings
+      const fromLocal = (() => {
+        try { return JSON.parse(localStorage.getItem('ode_gui_settings') || '{}'); }
+        catch { return {}; }
+      })();
+      // 3) defaults
+      const defaults = {
+        API_BASE: window.location.origin,
+        API_KEY: 'dev-key',
+        WS: true
+      };
+      return {...defaults, ...fromServer, ...fromLocal};
+    }
 
-            useEffect(() => {
-                // Try to auto-detect configuration
-                const detectConfig = async () => {
-                    // First try relative URLs (when served from same domain)
-                    const testEndpoints = [
-                        { base: '', key: 'dev-key' },
-                        { base: window.location.origin, key: 'dev-key' },
-                        { base: 'http://localhost:8080', key: 'dev-key' },
-                        { base: 'http://localhost:8000', key: 'dev-key' }
-                    ];
+    // ---------- API Client with /api then /api/v1 fallback ----------
+    class API {
+      constructor(base, key) {
+        this.base = base.replace(/\/+$/, '');
+        this.key = key;
+        this.client = axios.create({
+          baseURL: this.base,
+          headers: {'X-API-Key': this.key, 'Content-Type': 'application/json'},
+          withCredentials: false,
+          timeout: 15000
+        });
+        // Preferred then fallback paths
+        this.paths = ['/api', '/api/v1'];
+      }
 
-                    for (const endpoint of testEndpoints) {
-                        try {
-                            const response = await fetch(`${endpoint.base}/health`, {
-                                method: 'GET',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                }
-                            });
-                            
-                            if (response.ok) {
-                                const data = await response.json();
-                                setApiConfig({ baseURL: endpoint.base, apiKey: endpoint.key });
-                                setSystemStatus('healthy');
-                                setIsConfigured(true);
-                                console.log('API found at:', endpoint.base);
-                                return;
-                            }
-                        } catch (e) {
-                            console.log('Failed to connect to:', endpoint.base);
-                        }
-                    }
-                    
-                    setSystemStatus('error');
-                };
+      async _req(method, suffix, {params, data, responseType}={}) {
+        let lastErr;
+        for (const root of this.paths) {
+          try {
+            const url = `${root}${suffix}`;
+            const res = await this.client.request({method, url, params, data, responseType});
+            return res;
+          } catch (err) {
+            // try next path only for 404 or network error — otherwise bubble up
+            const status = err?.response?.status;
+            if (status && status !== 404) throw err;
+            lastErr = err;
+          }
+        }
+        throw lastErr || new Error('API unreachable');
+      }
 
-                detectConfig();
-            }, []);
+      // Health (no auth needed)
+      async health() {
+        // /health is at root (no /api)
+        const res = await axios.get(`${this.base}/health`, {timeout: 10000});
+        return res.data;
+      }
 
-            const handleConfigSave = (newConfig) => {
-                setApiConfig(newConfig);
-                setIsConfigured(true);
-                setSystemStatus('healthy');
-            };
+      async generators()  { return (await this._req('get', '/generators')).data; }
+      async functions()   { return (await this._req('get', '/functions')).data; }
+      async generate(d)   { return (await this._req('post','/generate', {data:d})).data; }
+      async batch(d)      { return (await this._req('post','/batch_generate', {data:d})).data; }
+      async verify(d)     { return (await this._req('post','/verify', {data:d})).data; }
 
-            if (!isConfigured && systemStatus === 'error') {
-                return (
-                    <div className="app-container">
-                        <ConfigurationView onSave={handleConfigSave} />
-                    </div>
-                );
+      async job(id)       { return (await this._req('get', `/jobs/${id}`)).data; }
+      async jobs(q)       { return (await this._req('get', '/jobs', {params: q?{status:q}:undefined})).data; }
+      async cancel(id)    { return (await this._req('delete', `/jobs/${id}`)).data; }
+
+      async datasets()    { return (await this._req('get', '/datasets')).data; }
+      async createDataset(odes, name) {
+        // backend expects body with fields {odes, name}
+        return (await this._req('post','/datasets/create',{data:{odes, name}})).data;
+      }
+      async downloadDataset(name, format='jsonl') {
+        const res = await this._req('get', `/datasets/${encodeURIComponent(name)}/download`, {
+          params:{format}, responseType:'blob'
+        });
+        return res.data;
+      }
+
+      async stats()       { return (await this._req('get', '/stats')).data; }
+      async models()      { return (await this._req('get', '/ml/models')).data; }
+      async mlTrain(d)    { return (await this._req('post','/ml/train', {data:d})).data; }
+      async mlGen(d)      { return (await this._req('post','/ml/generate', {data:d})).data; }
+    }
+
+    // ---------- Small helpers ----------
+    const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
+    const downloadBlob = (blob, filename) => {
+      const url = URL.createObjectURL(blob); const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
+    };
+
+    // ---------- App ----------
+    function App(){
+      const [settings, setSettings] = useState(loadInitialSettings);
+      const api = useMemo(()=>new API(settings.API_BASE, settings.API_KEY), [settings.API_BASE, settings.API_KEY]);
+
+      const [health, setHealth] = useState(null);
+      const [apiError, setApiError] = useState(null);
+      const [view, setView] = useState('generator'); // generator|batch|verify|datasets|jobs|ml|analytics|settings
+      const [wsOk, setWsOk] = useState(false);
+
+      // Health poll
+      useEffect(()=>{
+        let mounted = true;
+        (async ()=>{
+          try {
+            const h = await api.health();
+            if (!mounted) return;
+            setHealth(h); setApiError(null);
+          } catch (e) {
+            if (!mounted) return;
+            setApiError(e?.response?.data?.detail || e.message || 'API not reachable');
+          }
+        })();
+        const t = setInterval(async ()=>{
+          try { const h = await api.health(); setHealth(h); setApiError(null); }
+          catch { /* leave last state */ }
+        }, 30000);
+        return ()=>{ mounted=false; clearInterval(t); }
+      }, [api]);
+
+      // WebSocket (best effort)
+      useEffect(()=>{
+        if (!settings.WS) { setWsOk(false); return; }
+        let ws;
+        try{
+          const wsUrl = settings.API_BASE.replace(/^http/i,'ws') + `/ws/client-${Date.now()}`;
+          ws = new WebSocket(wsUrl);
+          ws.onopen=()=>setWsOk(true);
+          ws.onclose=()=>setWsOk(false);
+          ws.onerror=()=>setWsOk(false);
+        } catch { setWsOk(false); }
+        return ()=>{ try { ws && ws.close(); } catch{} };
+      }, [settings.API_BASE, settings.WS]);
+
+      const statusPill = (
+        <div className="status">
+          <div className="pill">
+            <span className="dot" style={{background: (health?.status==='healthy')?'#10b981':'#ef4444'}}></span>
+            <span>API: {health?.status || (apiError ? 'error' : 'checking…')}</span>
+          </div>
+          <div className="pill">ML: {health?.services?.ml_pipeline ? '✓' : '✗'}</div>
+          <div className="pill">Cache: {health?.services?.cache ? '✓' : '✗'}</div>
+          <div className="pill">WS: {settings.WS ? (wsOk?'✓':'…') : 'off'}</div>
+        </div>
+      );
+
+      return (
+        <div className="app">
+          <div className="header">
+            <div className="brand">
+              <span style={{fontSize:22}}>🔬</span>
+              <h1>ODE Master Generators</h1>
+              <span className="muted">Control Panel</span>
+            </div>
+            <div style={{display:'flex', gap:10, alignItems:'center'}}>
+              {statusPill}
+              <button className="btn ghost" onClick={()=>setView('settings')}>⚙️ Settings</button>
+              <button className="btn primary" onClick={()=>window.location.reload()}>↻ Refresh</button>
+            </div>
+          </div>
+
+          {apiError && (
+            <div className="error" style={{margin:'0 0 16px 0'}}>
+              <b>API Error:</b> {String(apiError)}<br/>
+              Check <b>Settings</b> → API Base & API Key, or ensure the server is running.
+            </div>
+          )}
+
+          <div className="layout">
+            <SideNav view={view} onChange={setView}/>
+            <div className="panel">
+              {view==='generator'  && <GeneratorView api={api}/>}
+              {view==='batch'      && <BatchView api={api}/>}
+              {view==='verify'     && <VerifyView api={api}/>}
+              {view==='datasets'   && <DatasetsView api={api}/>}
+              {view==='jobs'       && <JobsView api={api}/>}
+              {view==='ml'         && <MLView api={api}/>}
+              {view==='analytics'  && <AnalyticsView api={api}/>}
+              {view==='settings'   && <SettingsView settings={settings} setSettings={setSettings}/>}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function SideNav({view, onChange}){
+      const items = [
+        ['generator','⚡','ODE Generator'],
+        ['batch','📦','Batch Generation'],
+        ['verify','✓','Verification'],
+        ['datasets','💾','Datasets'],
+        ['jobs','🧰','Jobs'],
+        ['ml','🤖','ML'],
+        ['analytics','📊','Analytics'],
+        ['settings','⚙️','Settings']
+      ];
+      return (
+        <div className="side">
+          <div className="nav">
+            {items.map(([id,icon,label])=>(
+              <div key={id} className={'item ' + (id===view?'active':'')} onClick={()=>onChange(id)}>
+                <span>{icon}</span><span>{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ---------- Views ----------
+    function useOptions(api){
+      const [gens,setGens]=useState([]); const [funcs,setFuncs]=useState([]);
+      const [loading,setLoading]=useState(true); const [error,setError]=useState(null);
+      useEffect(()=>{
+        let live=true;
+        (async()=>{
+          try{
+            const [g,f] = await Promise.all([api.generators(), api.functions()]);
+            if(!live) return;
+            setGens(g?.all||[]); setFuncs(f?.functions||[]); setError(null);
+          }catch(e){ if(!live) return; setError(e?.response?.data?.detail || e.message); }
+          finally{ if(live) setLoading(false); }
+        })();
+        return ()=>{ live=false; };
+      }, [api]);
+      return {gens,funcs,loading,error};
+    }
+
+    function GeneratorView({api}){
+      const {gens,funcs,loading,error}=useOptions(api);
+      const [form,setForm]=useState({generator:'', function:'', count:1, verify:true, parameters:{}});
+      const [result,setResult]=useState(null); const [busy,setBusy]=useState(false); const [err,setErr]=useState(null);
+
+      useEffect(()=>{ if(gens[0] && !form.generator) setForm(f=>({...f,generator:gens[0]})); },[gens]);
+      useEffect(()=>{ if(funcs[0] && !form.function)  setForm(f=>({...f,function:funcs[0]})); },[funcs]);
+
+      const run = async()=>{
+        setBusy(true); setErr(null); setResult(null);
+        try{
+          const r = await api.generate(form);
+          if (r?.job_id) {
+            // poll until complete
+            let done=false;
+            while(!done){
+              await sleep(800);
+              const st = await api.job(r.job_id);
+              if (st.status==='completed') { setResult(st.results); done=true; }
+              if (st.status==='failed'   ) { throw new Error(st.error || 'Job failed'); }
             }
+          } else {
+            setResult(r);
+          }
+        }catch(e){ setErr(e?.response?.data?.detail || e.message); }
+        finally{ setBusy(false); }
+      };
 
-            return (
-                <div className="app-container">
-                    <Header systemStatus={systemStatus} />
-                    
-                    <div className="main-content">
-                        <Sidebar activeView={activeView} setActiveView={setActiveView} />
-                        
-                        <div className="content-panel">
-                            {activeView === 'generator' && (
-                                <GeneratorView apiConfig={apiConfig} />
-                            )}
-                            {activeView === 'verification' && (
-                                <VerificationView apiConfig={apiConfig} />
-                            )}
-                            {activeView === 'settings' && (
-                                <SettingsView 
-                                    apiConfig={apiConfig} 
-                                    onConfigChange={handleConfigSave}
-                                />
-                            )}
-                        </div>
-                    </div>
+      return (
+        <>
+          <h2 style={{marginBottom:8}}>ODE Generator</h2>
+          {loading && <div className="muted">Loading options…</div>}
+          {error && <div className="error">{error}</div>}
+
+          <div className="grid" style={{marginTop:10}}>
+            <div className="group">
+              <label className="label">Generator</label>
+              <select className="select" value={form.generator} disabled={!gens.length}
+                onChange={(e)=>setForm({...form, generator:e.target.value})}>
+                {gens.map(g=><option key={g} value={g}>{g}</option>)}
+              </select>
+            </div>
+            <div className="group">
+              <label className="label">Function</label>
+              <select className="select" value={form.function} disabled={!funcs.length}
+                onChange={(e)=>setForm({...form, function:e.target.value})}>
+                {funcs.map(f=><option key={f} value={f}>{f}</option>)}
+              </select>
+            </div>
+            <div className="group">
+              <label className="label">Count</label>
+              <input className="input" type="number" min="1" max="100" value={form.count}
+                onChange={(e)=>setForm({...form, count:parseInt(e.target.value||'1',10)})}/>
+            </div>
+            <div className="group">
+              <label className="label">Verify</label>
+              <select className="select" value={String(form.verify)}
+                onChange={(e)=>setForm({...form, verify:(e.target.value==='true')})}>
+                <option value="true">Yes</option><option value="false">No</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{marginTop:12, display:'flex', gap:10}}>
+            <button className="btn primary" disabled={busy || !form.generator || !form.function} onClick={run}>
+              {busy ? 'Generating…' : '⚡ Generate'}
+            </button>
+          </div>
+
+          {err && <div className="error" style={{marginTop:12}}>{err}</div>}
+          {result && <Results results={result}/>}
+        </>
+      );
+    }
+
+    function BatchView({api}){
+      const {gens,funcs}=useOptions(api);
+      const [form,setForm]=useState({
+        generators:[], functions:[], samples_per_combination:5, verify:true, save_dataset:true, dataset_name:''
+      });
+      const [msg,setMsg]=useState(null); const [busy,setBusy]=useState(false); const [err,setErr]=useState(null);
+
+      const toggle = (list, value) => list.includes(value) ? list.filter(x=>x!==value) : [...list, value];
+
+      const submit = async()=>{
+        setBusy(true); setErr(null); setMsg(null);
+        try{
+          const r = await api.batch(form);
+          setMsg(`Job ${r.job_id} created. Expected ODEs: ${r.total_expected}`);
+        }catch(e){ setErr(e?.response?.data?.detail || e.message); }
+        finally{ setBusy(false); }
+      };
+
+      return (
+        <>
+          <h2 style={{marginBottom:8}}>Batch Generation</h2>
+          <div className="group">
+            <label className="label">Generators</label>
+            <div style={{display:'flex', flexWrap:'wrap', gap:8}}>
+              {gens.map(g=>(
+                <label key={g} style={{display:'flex', gap:6, alignItems:'center'}}>
+                  <input type="checkbox" checked={form.generators.includes(g)} onChange={()=>setForm({...form, generators:toggle(form.generators,g)})}/>
+                  {g}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="group" style={{marginTop:10}}>
+            <label className="label">Functions</label>
+            <div style={{display:'flex', flexWrap:'wrap', gap:8}}>
+              {funcs.map(f=>(
+                <label key={f} style={{display:'flex', gap:6, alignItems:'center'}}>
+                  <input type="checkbox" checked={form.functions.includes(f)} onChange={()=>setForm({...form, functions:toggle(form.functions,f)})}/>
+                  {f}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid" style={{marginTop:10}}>
+            <div className="group">
+              <label className="label">Samples per Combination</label>
+              <input className="input" type="number" min="1" max="50" value={form.samples_per_combination}
+                onChange={(e)=>setForm({...form, samples_per_combination:parseInt(e.target.value||'1',10)})}/>
+            </div>
+            <div className="group">
+              <label className="label">Save as Dataset</label>
+              <select className="select" value={String(form.save_dataset)}
+                onChange={(e)=>setForm({...form, save_dataset:(e.target.value==='true')})}>
+                <option value="true">Yes</option><option value="false">No</option>
+              </select>
+            </div>
+            <div className="group">
+              <label className="label">Dataset Name (optional)</label>
+              <input className="input" placeholder="auto-generate if empty" value={form.dataset_name}
+                onChange={(e)=>setForm({...form, dataset_name:e.target.value})}/>
+            </div>
+          </div>
+
+          <div style={{marginTop:12}}>
+            <button className="btn primary" disabled={busy || !form.generators.length || !form.functions.length} onClick={submit}>
+              {busy?'Submitting…':'Start Batch'}
+            </button>
+          </div>
+
+          {err && <div className="error" style={{marginTop:12}}>{err}</div>}
+          {msg && <div className="success" style={{marginTop:12}}>{msg}</div>}
+        </>
+      );
+    }
+
+    function VerifyView({api}){
+      const [form,setForm]=useState({ode:'', solution:'', method:'substitution'});
+      const [res,setRes]=useState(null); const [busy,setBusy]=useState(false); const [err,setErr]=useState(null);
+      const run = async()=>{
+        setBusy(true); setErr(null); setRes(null);
+        try{ const r = await api.verify(form); setRes(r); } catch(e){ setErr(e?.response?.data?.detail || e.message); } finally{ setBusy(false); }
+      };
+      return (
+        <>
+          <h2 style={{marginBottom:8}}>Verification</h2>
+          <div className="group">
+            <label className="label">ODE (Sympy Eq(...))</label>
+            <textarea className="input" rows="3" placeholder="Eq(Derivative(y(x),x,2) + y(x), sin(x))"
+              value={form.ode} onChange={e=>setForm({...form, ode:e.target.value})}/>
+          </div>
+          <div className="group" style={{marginTop:10}}>
+            <label className="label">Solution</label>
+            <textarea className="input" rows="3" placeholder="sin(x) + cos(x)"
+              value={form.solution} onChange={e=>setForm({...form, solution:e.target.value})}/>
+          </div>
+          <div className="group" style={{marginTop:10}}>
+            <label className="label">Method</label>
+            <select className="select" value={form.method} onChange={e=>setForm({...form, method:e.target.value})}>
+              <option value="substitution">substitution</option>
+              <option value="numeric">numeric</option>
+            </select>
+          </div>
+
+          <div style={{marginTop:12}}>
+            <button className="btn primary" disabled={busy || !form.ode || !form.solution} onClick={run}>
+              {busy?'Verifying…':'Verify'}
+            </button>
+          </div>
+
+          {err && <div className="error" style={{marginTop:12}}>{err}</div>}
+          {res && (
+            <div className={res.verified?'success':'error'} style={{marginTop:12}}>
+              <b>Verified:</b> {String(res.verified)} | <b>Method:</b> {res.method} | <b>Confidence:</b> {(res.confidence*100).toFixed(1)}%
+              {res.error && <div style={{marginTop:6}}>Error: {res.error}</div>}
+            </div>
+          )}
+        </>
+      );
+    }
+
+    function DatasetsView({api}){
+      const [data,setData]=useState([]); const [loading,setLoading]=useState(true); const [err,setErr]=useState(null);
+      const load = useCallback(async()=>{
+        setLoading(true); setErr(null);
+        try{ const r = await api.datasets(); setData(r.datasets||[]); }catch(e){ setErr(e?.response?.data?.detail || e.message); }
+        finally{ setLoading(false); }
+      },[api]);
+      useEffect(()=>{ load(); },[load]);
+
+      const dl = async(name, fmt) => {
+        try { const blob = await api.downloadDataset(name, fmt); downloadBlob(blob, `${name}.${fmt}`); }
+        catch(e){ alert('Download failed: ' + (e?.response?.data?.detail || e.message)); }
+      };
+
+      return (
+        <>
+          <h2 style={{marginBottom:8}}>Datasets</h2>
+          <div style={{marginBottom:8}}>
+            <button className="btn ghost" onClick={load}>↻ Refresh</button>
+          </div>
+          {loading && <div className="muted">Loading…</div>}
+          {err && <div className="error">{err}</div>}
+          {!loading && !err && (
+            <div className="jobs">
+              {data.map(d=>(
+                <div className="job" key={d.name}>
+                  <div>
+                    <div style={{fontWeight:700}}>{d.name}</div>
+                    <div className="muted">Size: {(d.size_bytes/1024).toFixed(2)} KB • Created: {new Date(d.created_at).toLocaleString()}</div>
+                  </div>
+                  <div style={{display:'flex', gap:8}}>
+                    <button className="btn ghost" onClick={()=>dl(d.name,'jsonl')}>JSONL</button>
+                    <button className="btn ghost" onClick={()=>dl(d.name,'csv')}>CSV</button>
+                  </div>
                 </div>
-            );
-        }
+              ))}
+              {data.length===0 && <div className="muted">No datasets yet.</div>}
+            </div>
+          )}
+        </>
+      );
+    }
 
-        // Configuration View
-        function ConfigurationView({ onSave }) {
-            const [config, setConfig] = useState({
-                baseURL: window.location.origin,
-                apiKey: 'dev-key'
-            });
-            const [testing, setTesting] = useState(false);
-            const [testResult, setTestResult] = useState(null);
-
-            const testConnection = async () => {
-                setTesting(true);
-                setTestResult(null);
-                
-                try {
-                    const response = await fetch(`${config.baseURL}/health`, {
-                        headers: {
-                            'X-API-Key': config.apiKey
-                        }
-                    });
-                    
-                    if (response.ok) {
-                        setTestResult({ success: true, message: 'Connection successful!' });
-                        setTimeout(() => onSave(config), 1000);
-                    } else {
-                        setTestResult({ success: false, message: `Error: ${response.status}` });
-                    }
-                } catch (error) {
-                    setTestResult({ success: false, message: error.message });
-                } finally {
-                    setTesting(false);
-                }
-            };
-
-            return (
-                <div style={{ background: 'white', padding: '32px', borderRadius: '12px', maxWidth: '600px', margin: '100px auto' }}>
-                    <h2>Configure API Connection</h2>
-                    <p style={{ marginBottom: '24px', color: '#6b7280' }}>
-                        Please configure the API connection to continue.
-                    </p>
-                    
-                    <div className="form-group">
-                        <label className="form-label">API Base URL</label>
-                        <input
-                            type="text"
-                            className="form-input"
-                            value={config.baseURL}
-                            onChange={(e) => setConfig({ ...config, baseURL: e.target.value })}
-                            placeholder="https://your-api.railway.app or leave empty for same domain"
-                        />
-                    </div>
-                    
-                    <div className="form-group">
-                        <label className="form-label">API Key</label>
-                        <input
-                            type="text"
-                            className="form-input"
-                            value={config.apiKey}
-                            onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
-                            placeholder="Enter your API key"
-                        />
-                    </div>
-                    
-                    <button 
-                        className="btn btn-primary" 
-                        onClick={testConnection}
-                        disabled={testing}
-                        style={{ marginTop: '16px' }}
-                    >
-                        {testing ? 'Testing...' : 'Test Connection'}
-                    </button>
-                    
-                    {testResult && (
-                        <div className={testResult.success ? 'success-message' : 'error-message'}>
-                            {testResult.message}
-                        </div>
-                    )}
-                </div>
-            );
-        }
-
-        // Header Component
-        function Header({ systemStatus }) {
-            return (
-                <div className="header">
-                    <h1>🔬 ODE Master Generators</h1>
-                    <div className="status-bar">
-                        <div className="status-indicator">
-                            <div 
-                                className="status-dot" 
-                                style={{
-                                    background: systemStatus === 'healthy' ? '#10b981' : 
-                                              systemStatus === 'checking' ? '#f59e0b' : '#ef4444'
-                                }}
-                            ></div>
-                            <span>
-                                System {systemStatus === 'healthy' ? 'Online' : 
-                                       systemStatus === 'checking' ? 'Connecting...' : 'Offline'}
-                            </span>
-                        </div>
-                    </div>
-                </div>
-            );
-        }
-
-        // Sidebar Component
-        function Sidebar({ activeView, setActiveView }) {
-            const menuItems = [
-                { id: 'generator', label: 'ODE Generator', icon: '⚡' },
-                { id: 'verification', label: 'Verification', icon: '✓' },
-                { id: 'settings', label: 'Settings', icon: '⚙️' }
-            ];
-
-            return (
-                <div className="sidebar">
-                    {menuItems.map(item => (
-                        <div
-                            key={item.id}
-                            className={`nav-item ${activeView === item.id ? 'active' : ''}`}
-                            onClick={() => setActiveView(item.id)}
-                        >
-                            <span>{item.icon}</span>
-                            <span>{item.label}</span>
-                        </div>
-                    ))}
-                </div>
-            );
-        }
-
-        // Generator View with hardcoded options as fallback
-        function GeneratorView({ apiConfig }) {
-            // Hardcoded fallback options
-            const DEFAULT_GENERATORS = ['L1', 'L2', 'L3', 'L4', 'N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'N7'];
-            const DEFAULT_FUNCTIONS = [
-                'identity', 'quadratic', 'cubic', 'quartic', 'quintic',
-                'exponential', 'exp_scaled', 'exp_quadratic', 'exp_negative',
-                'sine', 'cosine', 'tangent_safe', 'sine_scaled', 'cosine_scaled',
-                'sinh', 'cosh', 'tanh', 'sinh_scaled', 'cosh_scaled',
-                'log_safe', 'log_shifted', 'log_scaled',
-                'rational_simple', 'rational_stable', 'rational_cubic',
-                'exp_sin', 'sin_exp', 'gaussian', 'bessel_like',
-                'erf_approx', 'sigmoid', 'softplus'
-            ];
-
-            const [generators, setGenerators] = useState(DEFAULT_GENERATORS);
-            const [functions, setFunctions] = useState(DEFAULT_FUNCTIONS);
-            const [formData, setFormData] = useState({
-                generator: DEFAULT_GENERATORS[0],
-                function: DEFAULT_FUNCTIONS[0],
-                count: 1,
-                verify: true,
-                parameters: {
-                    alpha: 1.0,
-                    beta: 1.0,
-                    M: 0.0,
-                    q: 2,
-                    v: 3,
-                    a: 2
-                }
-            });
-            const [loading, setLoading] = useState(false);
-            const [result, setResult] = useState(null);
-            const [error, setError] = useState(null);
-
-            useEffect(() => {
-                // Try to load actual options from API
-                if (apiConfig.baseURL) {
-                    loadOptions();
-                }
-            }, [apiConfig]);
-
-            const loadOptions = async () => {
-                try {
-                    const headers = {
-                        'X-API-Key': apiConfig.apiKey,
-                        'Content-Type': 'application/json'
-                    };
-
-                    // Try to fetch generators
-                    try {
-                        const genResponse = await fetch(`${apiConfig.baseURL}/api/generators`, { headers });
-                        if (genResponse.ok) {
-                            const genData = await genResponse.json();
-                            if (genData.all && genData.all.length > 0) {
-                                setGenerators(genData.all);
-                                setFormData(prev => ({ ...prev, generator: genData.all[0] }));
-                            }
-                        }
-                    } catch (e) {
-                        console.log('Using default generators');
-                    }
-
-                    // Try to fetch functions
-                    try {
-                        const funcResponse = await fetch(`${apiConfig.baseURL}/api/functions`, { headers });
-                        if (funcResponse.ok) {
-                            const funcData = await funcResponse.json();
-                            if (funcData.functions && funcData.functions.length > 0) {
-                                setFunctions(funcData.functions);
-                                setFormData(prev => ({ ...prev, function: funcData.functions[0] }));
-                            }
-                        }
-                    } catch (e) {
-                        console.log('Using default functions');
-                    }
-                } catch (error) {
-                    console.error('Failed to load options:', error);
-                }
-            };
-
-            const handleGenerate = async () => {
-                setLoading(true);
-                setError(null);
-                setResult(null);
-
-                try {
-                    const response = await fetch(`${apiConfig.baseURL}/api/generate`, {
-                        method: 'POST',
-                        headers: {
-                            'X-API-Key': apiConfig.apiKey,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(formData)
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`API Error: ${response.status}`);
-                    }
-
-                    const data = await response.json();
-                    
-                    if (data.job_id) {
-                        // Poll for job completion
-                        pollJobStatus(data.job_id);
-                    } else {
-                        setResult(data);
-                    }
-                } catch (error) {
-                    setError(error.message || 'Generation failed');
-                    setLoading(false);
-                }
-            };
-
-            const pollJobStatus = async (jobId) => {
-                const pollInterval = setInterval(async () => {
-                    try {
-                        const response = await fetch(`${apiConfig.baseURL}/api/jobs/${jobId}`, {
-                            headers: {
-                                'X-API-Key': apiConfig.apiKey
-                            }
-                        });
-
-                        if (response.ok) {
-                            const status = await response.json();
-                            
-                            if (status.status === 'completed') {
-                                clearInterval(pollInterval);
-                                setResult(status.results);
-                                setLoading(false);
-                            } else if (status.status === 'failed') {
-                                clearInterval(pollInterval);
-                                setError(status.error || 'Job failed');
-                                setLoading(false);
-                            }
-                        }
-                    } catch (error) {
-                        clearInterval(pollInterval);
-                        setError('Failed to check job status');
-                        setLoading(false);
-                    }
-                }, 1000);
-
-                // Timeout after 30 seconds
-                setTimeout(() => {
-                    clearInterval(pollInterval);
-                    if (loading) {
-                        setError('Job timeout');
-                        setLoading(false);
-                    }
-                }, 30000);
-            };
-
-            return (
+    function JobsView({api}){
+      const [filter,setFilter]=useState('all'); // all|queued|running|completed|failed
+      const [rows,setRows]=useState([]); const [tick,setTick]=useState(0);
+      const load = useCallback(async()=>{
+        try{ const r = await api.jobs(filter==='all'?null:filter); setRows(r.jobs||[]); }catch(e){}
+      },[api,filter]);
+      useEffect(()=>{ load(); const t=setInterval(()=>setTick(x=>x+1), 1500); return ()=>clearInterval(t); },[load]);
+      useEffect(()=>{ load(); },[tick]);
+      const cancel = async(id)=>{ if(!confirm('Cancel job?')) return; try{ await api.cancel(id); load(); }catch(e){ alert('Cancel failed'); } };
+      const tabs = ['all','queued','running','completed','failed'];
+      return (
+        <>
+          <h2 style={{marginBottom:8}}>Jobs</h2>
+          <div className="tabs">
+            {tabs.map(t=>(
+              <button key={t} className={'tab '+(filter===t?'active':'')} onClick={()=>setFilter(t)}>{t[0].toUpperCase()+t.slice(1)}</button>
+            ))}
+          </div>
+          <div className="jobs">
+            {rows.map(j=>(
+              <div key={j.job_id} className="job">
                 <div>
-                    <h2>ODE Generator</h2>
-                    
-                    <div className="form-grid">
-                        <div className="form-group">
-                            <label className="form-label">Generator</label>
-                            <select
-                                className="form-select"
-                                value={formData.generator}
-                                onChange={(e) => setFormData({ ...formData, generator: e.target.value })}
-                            >
-                                {generators.map(gen => (
-                                    <option key={gen} value={gen}>{gen}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="form-group">
-                            <label className="form-label">Function</label>
-                            <select
-                                className="form-select"
-                                value={formData.function}
-                                onChange={(e) => setFormData({ ...formData, function: e.target.value })}
-                            >
-                                {functions.map(func => (
-                                    <option key={func} value={func}>{func}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="form-group">
-                            <label className="form-label">Count</label>
-                            <input
-                                type="number"
-                                className="form-input"
-                                value={formData.count}
-                                min="1"
-                                max="100"
-                                onChange={(e) => setFormData({ ...formData, count: parseInt(e.target.value) || 1 })}
-                            />
-                        </div>
-
-                        <div className="form-group">
-                            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <input
-                                    type="checkbox"
-                                    checked={formData.verify}
-                                    onChange={(e) => setFormData({ ...formData, verify: e.target.checked })}
-                                />
-                                Verify Solutions
-                            </label>
-                        </div>
-                    </div>
-
-                    <h3>Parameters</h3>
-                    <div className="form-grid">
-                        <div className="form-group">
-                            <label className="form-label">α (Alpha)</label>
-                            <input
-                                type="number"
-                                className="form-input"
-                                value={formData.parameters.alpha}
-                                step="0.1"
-                                onChange={(e) => setFormData({
-                                    ...formData,
-                                    parameters: { ...formData.parameters, alpha: parseFloat(e.target.value) || 0 }
-                                })}
-                            />
-                        </div>
-
-                        <div className="form-group">
-                            <label className="form-label">β (Beta)</label>
-                            <input
-                                type="number"
-                                className="form-input"
-                                value={formData.parameters.beta}
-                                step="0.1"
-                                onChange={(e) => setFormData({
-                                    ...formData,
-                                    parameters: { ...formData.parameters, beta: parseFloat(e.target.value) || 0 }
-                                })}
-                            />
-                        </div>
-
-                        <div className="form-group">
-                            <label className="form-label">M</label>
-                            <input
-                                type="number"
-                                className="form-input"
-                                value={formData.parameters.M}
-                                step="0.1"
-                                onChange={(e) => setFormData({
-                                    ...formData,
-                                    parameters: { ...formData.parameters, M: parseFloat(e.target.value) || 0 }
-                                })}
-                            />
-                        </div>
-
-                        {formData.generator.startsWith('N') && (
-                            <>
-                                <div className="form-group">
-                                    <label className="form-label">q (Power)</label>
-                                    <input
-                                        type="number"
-                                        className="form-input"
-                                        value={formData.parameters.q}
-                                        min="1"
-                                        max="10"
-                                        onChange={(e) => setFormData({
-                                            ...formData,
-                                            parameters: { ...formData.parameters, q: parseInt(e.target.value) || 2 }
-                                        })}
-                                    />
-                                </div>
-
-                                <div className="form-group">
-                                    <label className="form-label">v (Power)</label>
-                                    <input
-                                        type="number"
-                                        className="form-input"
-                                        value={formData.parameters.v}
-                                        min="1"
-                                        max="10"
-                                        onChange={(e) => setFormData({
-                                            ...formData,
-                                            parameters: { ...formData.parameters, v: parseInt(e.target.value) || 3 }
-                                        })}
-                                    />
-                                </div>
-                            </>
-                        )}
-
-                        {(formData.generator === 'L4' || formData.generator === 'N6') && (
-                            <div className="form-group">
-                                <label className="form-label">a (Pantograph)</label>
-                                <input
-                                    type="number"
-                                    className="form-input"
-                                    value={formData.parameters.a}
-                                    min="2"
-                                    max="10"
-                                    onChange={(e) => setFormData({
-                                        ...formData,
-                                        parameters: { ...formData.parameters, a: parseInt(e.target.value) || 2 }
-                                    })}
-                                />
-                            </div>
-                        )}
-                    </div>
-
-                    <button 
-                        className="btn btn-primary" 
-                        onClick={handleGenerate}
-                        disabled={loading}
-                    >
-                        {loading ? (
-                            <>
-                                <span className="loading-spinner"></span>
-                                Generating...
-                            </>
-                        ) : (
-                            <>⚡ Generate ODE</>
-                        )}
-                    </button>
-
-                    {error && (
-                        <div className="error-message">
-                            <strong>Error:</strong> {error}
-                        </div>
-                    )}
-
-                    {result && (
-                        <div className="results-container">
-                            <h3>Generated ODEs</h3>
-                            {Array.isArray(result) ? (
-                                result.map((ode, index) => (
-                                    <ODEResultCard key={index} ode={ode} />
-                                ))
-                            ) : (
-                                <ODEResultCard ode={result} />
-                            )}
-                        </div>
-                    )}
+                  <div style={{fontWeight:700}}>{j.job_id}</div>
+                  <div className="muted">Status: {j.status} • Progress: {j.progress?.toFixed?.(0)??0}%</div>
                 </div>
-            );
-        }
-
-        // ODE Result Card
-        function ODEResultCard({ ode }) {
-            if (!ode) return null;
-
-            return (
-                <div className="result-card">
-                    <div className="result-header">
-                        <span>
-                            <strong>{ode.generator || 'Unknown'}</strong> - {ode.function || 'Unknown'}
-                        </span>
-                        {ode.verified !== undefined && (
-                            <span className={`result-badge ${ode.verified ? 'badge-success' : 'badge-error'}`}>
-                                {ode.verified ? 'Verified ✓' : 'Not Verified ✗'}
-                            </span>
-                        )}
-                    </div>
-
-                    <div className="math-display">
-                        <strong>ODE:</strong>
-                        <div style={{ marginTop: '8px' }}>{ode.ode || 'N/A'}</div>
-                    </div>
-
-                    {ode.solution && (
-                        <div className="math-display">
-                            <strong>Solution:</strong>
-                            <div style={{ marginTop: '8px' }}>{ode.solution}</div>
-                        </div>
-                    )}
-
-                    {ode.verification && (
-                        <div style={{ marginTop: '12px', padding: '12px', background: '#f9fafb', borderRadius: '8px' }}>
-                            <strong>Verification Details:</strong>
-                            <div>Method: {ode.verification.method}</div>
-                            <div>Confidence: {((ode.verification.confidence || 0) * 100).toFixed(1)}%</div>
-                        </div>
-                    )}
-
-                    {ode.initial_conditions && Object.keys(ode.initial_conditions).length > 0 && (
-                        <div style={{ marginTop: '12px' }}>
-                            <strong>Initial Conditions:</strong>
-                            {Object.entries(ode.initial_conditions).map(([key, value]) => (
-                                <div key={key}>{key} = {value}</div>
-                            ))}
-                        </div>
-                    )}
+                <div style={{display:'flex', alignItems:'center', gap:12}}>
+                  <div className="bar"><div className="fill" style={{width: `${Math.max(0, Math.min(100, j.progress||0))}%`}}></div></div>
+                  {(j.status==='queued'||j.status==='running') && <button className="btn ghost" onClick={()=>cancel(j.job_id)}>Cancel</button>}
                 </div>
-            );
-        }
+              </div>
+            ))}
+            {rows.length===0 && <div className="muted">No jobs.</div>}
+          </div>
+        </>
+      );
+    }
 
-        // Verification View
-        function VerificationView({ apiConfig }) {
-            const [formData, setFormData] = useState({
-                ode: '',
-                solution: '',
-                method: 'substitution'
-            });
-            const [result, setResult] = useState(null);
-            const [loading, setLoading] = useState(false);
-            const [error, setError] = useState(null);
+    function MLView({api}){
+      const [tab,setTab]=useState('models'); // models|train|generate
+      const [models,setModels]=useState([]); const [datasets,setDatasets]=useState([]);
+      const [train,setTrain]=useState({dataset:'', model_type:'pattern_net', epochs:10, batch_size:32, learning_rate:0.001, early_stopping:true, validation_split:0.2});
+      const [gen,setGen]=useState({model_path:'', n_samples:10, temperature:0.8});
+      const [msg,setMsg]=useState(null); const [err,setErr]=useState(null);
 
-            const handleVerify = async () => {
-                setLoading(true);
-                setError(null);
-                setResult(null);
+      const load = useCallback(async()=>{
+        try{
+          const [m, d] = await Promise.all([api.models(), api.datasets()]);
+          setModels(m.models||[]); setDatasets(d.datasets||[]);
+          if (!train.dataset && d.datasets?.[0]) setTrain(s=>({...s,dataset:d.datasets[0].name}));
+          if (!gen.model_path && m.models?.[0]) setGen(s=>({...s, model_path:m.models[0].name+'.pth'}));
+        }catch(e){}
+      },[api]);
+      useEffect(()=>{ load(); },[load]);
 
-                try {
-                    const response = await fetch(`${apiConfig.baseURL}/api/verify`, {
-                        method: 'POST',
-                        headers: {
-                            'X-API-Key': apiConfig.apiKey,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(formData)
-                    });
+      const startTrain = async()=>{
+        setErr(null); setMsg(null);
+        try{ const r = await api.mlTrain(train); setMsg(`Training job ${r.job_id} created.`); }
+        catch(e){ setErr(e?.response?.data?.detail || e.message); }
+      };
+      const startGen = async()=>{
+        setErr(null); setMsg(null);
+        try{ const r = await api.mlGen(gen); setMsg(`Generation job ${r.job_id} created.`); }
+        catch(e){ setErr(e?.response?.data?.detail || e.message); }
+      };
 
-                    if (!response.ok) {
-                        throw new Error(`API Error: ${response.status}`);
-                    }
+      return (
+        <>
+          <h2 style={{marginBottom:8}}>ML Pipeline</h2>
+          <div className="tabs">
+            {['models','train','generate'].map(t=>(
+              <button key={t} className={'tab '+(tab===t?'active':'')} onClick={()=>setTab(t)}>{t[0].toUpperCase()+t.slice(1)}</button>
+            ))}
+          </div>
 
-                    const data = await response.json();
-                    setResult(data);
-                } catch (error) {
-                    setError(error.message || 'Verification failed');
-                } finally {
-                    setLoading(false);
-                }
-            };
-
-            return (
-                <div>
-                    <h2>ODE Verification</h2>
-                    
-                    <div className="form-group">
-                        <label className="form-label">ODE Equation</label>
-                        <textarea
-                            className="form-input"
-                            rows="3"
-                            placeholder="Enter ODE equation (e.g., Eq(Derivative(y(x), x, 2) + y(x), sin(x)))"
-                            value={formData.ode}
-                            onChange={(e) => setFormData({ ...formData, ode: e.target.value })}
-                            style={{ fontFamily: 'monospace' }}
-                        />
-                    </div>
-
-                    <div className="form-group">
-                        <label className="form-label">Solution</label>
-                        <textarea
-                            className="form-input"
-                            rows="3"
-                            placeholder="Enter solution (e.g., sin(x) + cos(x))"
-                            value={formData.solution}
-                            onChange={(e) => setFormData({ ...formData, solution: e.target.value })}
-                            style={{ fontFamily: 'monospace' }}
-                        />
-                    </div>
-
-                    <div className="form-group">
-                        <label className="form-label">Verification Method</label>
-                        <select
-                            className="form-select"
-                            value={formData.method}
-                            onChange={(e) => setFormData({ ...formData, method: e.target.value })}
-                        >
-                            <option value="substitution">Substitution</option>
-                            <option value="numerical">Numerical</option>
-                            <option value="checkodesol">Check ODE Sol</option>
-                        </select>
-                    </div>
-
-                    <button 
-                        className="btn btn-primary"
-                        onClick={handleVerify}
-                        disabled={loading || !formData.ode || !formData.solution}
-                    >
-                        {loading ? 'Verifying...' : 'Verify ODE'}
-                    </button>
-
-                    {error && (
-                        <div className="error-message">
-                            <strong>Error:</strong> {error}
-                        </div>
-                    )}
-
-                    {result && (
-                        <div className={result.verified ? 'success-message' : 'error-message'}>
-                            <strong>Verification Result:</strong>
-                            <div>Status: {result.verified ? 'Verified ✓' : 'Not Verified ✗'}</div>
-                            <div>Method: {result.method}</div>
-                            <div>Confidence: {((result.confidence || 0) * 100).toFixed(1)}%</div>
-                            {result.error && <div>Error: {result.error}</div>}
-                        </div>
-                    )}
+          {tab==='models' && (
+            <div className="jobs">
+              {models.map(m=>(
+                <div className="job" key={m.name}>
+                  <div>
+                    <div style={{fontWeight:700}}>{m.name}</div>
+                    <div className="muted">Size: {(m.size_bytes/(1024*1024)).toFixed(2)} MB • {new Date(m.created_at).toLocaleString()}</div>
+                  </div>
                 </div>
-            );
-        }
+              ))}
+              {models.length===0 && <div className="muted">No models found.</div>}
+            </div>
+          )}
 
-        // Settings View
-        function SettingsView({ apiConfig, onConfigChange }) {
-            const [config, setConfig] = useState(apiConfig);
-            const [testing, setTesting] = useState(false);
-            const [testResult, setTestResult] = useState(null);
-
-            const testConnection = async () => {
-                setTesting(true);
-                setTestResult(null);
-
-                try {
-                    const response = await fetch(`${config.baseURL}/health`, {
-                        headers: {
-                            'X-API-Key': config.apiKey
-                        }
-                    });
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        setTestResult({ 
-                            success: true, 
-                            message: 'Connection successful!',
-                            details: data
-                        });
-                    } else {
-                        setTestResult({ 
-                            success: false, 
-                            message: `Error: ${response.status} ${response.statusText}` 
-                        });
-                    }
-                } catch (error) {
-                    setTestResult({ 
-                        success: false, 
-                        message: `Connection failed: ${error.message}` 
-                    });
-                } finally {
-                    setTesting(false);
-                }
-            };
-
-            const handleSave = () => {
-                onConfigChange(config);
-                setTestResult({ success: true, message: 'Configuration saved!' });
-            };
-
-            return (
-                <div>
-                    <h2>Settings</h2>
-                    
-                    <div className="config-section">
-                        <h3>API Configuration</h3>
-                        
-                        <div className="form-group">
-                            <label className="form-label">API Base URL</label>
-                            <input 
-                                type="text" 
-                                className="form-input" 
-                                value={config.baseURL}
-                                onChange={(e) => setConfig({ ...config, baseURL: e.target.value })}
-                                placeholder="Leave empty for same domain or enter https://your-api.railway.app"
-                            />
-                            <small style={{ color: '#6b7280' }}>
-                                Current: {config.baseURL || 'Same domain'}
-                            </small>
-                        </div>
-                        
-                        <div className="form-group">
-                            <label className="form-label">API Key</label>
-                            <input 
-                                type="text" 
-                                className="form-input" 
-                                value={config.apiKey}
-                                onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
-                            />
-                        </div>
-                        
-                        <div style={{ display: 'flex', gap: '12px' }}>
-                            <button 
-                                className="btn btn-primary"
-                                onClick={testConnection}
-                                disabled={testing}
-                            >
-                                {testing ? 'Testing...' : 'Test Connection'}
-                            </button>
-                            
-                            <button 
-                                className="btn btn-primary"
-                                onClick={handleSave}
-                            >
-                                Save Configuration
-                            </button>
-                        </div>
-                        
-                        {testResult && (
-                            <div className={testResult.success ? 'success-message' : 'error-message'}>
-                                {testResult.message}
-                                {testResult.details && (
-                                    <div style={{ marginTop: '8px', fontSize: '12px' }}>
-                                        <div>Status: {testResult.details.status}</div>
-                                        {testResult.details.services && (
-                                            <div>
-                                                Services: 
-                                                {Object.entries(testResult.details.services).map(([key, value]) => (
-                                                    <span key={key}> {key}: {value ? '✓' : '✗'}</span>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                    
-                    <div className="config-section">
-                        <h3>System Information</h3>
-                        <div className="config-item">
-                            <strong>Window Origin:</strong> {window.location.origin}
-                        </div>
-                        <div className="config-item">
-                            <strong>Protocol:</strong> {window.location.protocol}
-                        </div>
-                        <div className="config-item">
-                            <strong>Host:</strong> {window.location.host}
-                        </div>
-                    </div>
+          {tab==='train' && (
+            <>
+              <div className="grid">
+                <div className="group">
+                  <label className="label">Dataset</label>
+                  <select className="select" value={train.dataset} onChange={e=>setTrain({...train, dataset:e.target.value})}>
+                    {datasets.map(d=><option key={d.name} value={d.name}>{d.name}</option>)}
+                  </select>
                 </div>
-            );
-        }
+                <div className="group">
+                  <label className="label">Model Type</label>
+                  <select className="select" value={train.model_type} onChange={e=>setTrain({...train, model_type:e.target.value})}>
+                    <option value="pattern_net">pattern_net</option>
+                    <option value="transformer">transformer</option>
+                    <option value="vae">vae</option>
+                  </select>
+                </div>
+                <div className="group"><label className="label">Epochs</label><input className="input" type="number" min="1" max="1000" value={train.epochs} onChange={e=>setTrain({...train,epochs:+e.target.value})}/></div>
+                <div className="group"><label className="label">Batch Size</label><input className="input" type="number" min="8" max="256" value={train.batch_size} onChange={e=>setTrain({...train,batch_size:+e.target.value})}/></div>
+                <div className="group"><label className="label">Learning Rate</label><input className="input" type="number" step="0.0001" value={train.learning_rate} onChange={e=>setTrain({...train,learning_rate:+e.target.value})}/></div>
+                <div className="group">
+                  <label className="label">Early Stopping</label>
+                  <select className="select" value={String(train.early_stopping)} onChange={e=>setTrain({...train, early_stopping:(e.target.value==='true')})}>
+                    <option value="true">true</option><option value="false">false</option>
+                  </select>
+                </div>
+                <div className="group">
+                  <label className="label">Validation Split</label>
+                  <input className="input" type="number" min="0.1" max="0.5" step="0.05" value={train.validation_split} onChange={e=>setTrain({...train, validation_split:+e.target.value})}/>
+                </div>
+              </div>
+              <div style={{marginTop:12}}>
+                <button className="btn primary" onClick={startTrain}>Start Training</button>
+              </div>
+            </>
+          )}
 
-        // Mount the app
-        ReactDOM.render(<App />, document.getElementById('root'));
-    </script>
+          {tab==='generate' && (
+            <>
+              <div className="grid">
+                <div className="group">
+                  <label className="label">Model (path or name.pth)</label>
+                  <input className="input" value={gen.model_path} onChange={e=>setGen({...gen, model_path:e.target.value})}/>
+                </div>
+                <div className="group"><label className="label">Samples</label><input className="input" type="number" min="1" max="1000" value={gen.n_samples} onChange={e=>setGen({...gen, n_samples:+e.target.value})}/></div>
+                <div className="group"><label className="label">Temperature</label><input className="input" type="number" min="0.1" max="2" step="0.1" value={gen.temperature} onChange={e=>setGen({...gen, temperature:+e.target.value})}/></div>
+              </div>
+              <div style={{marginTop:12}}>
+                <button className="btn primary" onClick={startGen}>Start ML Generation</button>
+              </div>
+            </>
+          )}
+
+          {err && <div className="error" style={{marginTop:12}}>{err}</div>}
+          {msg && <div className="success" style={{marginTop:12}}>{msg}</div>}
+        </>
+      );
+    }
+
+    function AnalyticsView({api}){
+      const [stats,setStats]=useState(null);
+      const canvasRef = useRef(null), chartRef = useRef(null);
+      const load = useCallback(async()=>{ try{ const s = await api.stats(); setStats(s); }catch(e){} },[api]);
+      useEffect(()=>{ load(); const t = setInterval(load, 5000); return ()=>clearInterval(t); },[load]);
+
+      useEffect(()=>{
+        if (!canvasRef.current || !stats) return;
+        const ctx = canvasRef.current.getContext('2d');
+        chartRef.current && chartRef.current.destroy();
+        chartRef.current = new Chart(ctx, {
+          type:'bar',
+          data: {
+            labels: Object.keys(stats.queue_stats||{}),
+            datasets: [{label:'Queued Jobs', data:Object.values(stats.queue_stats||{}), borderWidth:1}]
+          },
+          options: {responsive:true, scales:{y:{beginAtZero:true}}}
+        });
+      },[stats]);
+
+      return (
+        <>
+          <h2 style={{marginBottom:8}}>Analytics</h2>
+          {!stats && <div className="muted">Loading…</div>}
+          {stats && (
+            <>
+              <div className="grid" style={{marginBottom:10}}>
+                <Stat title="Generated (24h)" value={stats.statistics?.total_generated_24h ?? 0}/>
+                <Stat title="Verification Rate" value={`${((stats.statistics?.verification_rate||0)*100).toFixed(1)}%`}/>
+                <Stat title="Active Jobs" value={stats.statistics?.active_jobs ?? 0}/>
+                <Stat title="Total Jobs" value={stats.statistics?.total_jobs ?? 0}/>
+              </div>
+              <div className="card">
+                <h3 style={{margin:'0 0 10px 0'}}>Queues</h3>
+                <div style={{height:300}}><canvas ref={canvasRef}/></div>
+              </div>
+              <div className="card">
+                <h3 style={{margin:'0 0 8px 0'}}>Capabilities</h3>
+                <div className="muted">
+                  Generators: {stats.capabilities?.generators ?? 0} •
+                  Functions: {stats.capabilities?.functions ?? 0} •
+                  ML: {stats.capabilities?.ml_enabled ? 'on' : 'off'} •
+                  Redis: {stats.capabilities?.redis_enabled ? 'on' : 'off'}
+                </div>
+              </div>
+            </>
+          )}
+        </>
+      );
+    }
+    function Stat({title,value}){ return (<div className="card"><div style={{fontSize:26,fontWeight:800,color:'var(--primary)'}}>{value}</div><div className="muted">{title}</div></div>); }
+
+    function Results({results}){
+      const arr = Array.isArray(results) ? results : [results];
+      useEffect(()=>{ window.MathJax?.typesetPromise?.(); }, [results]);
+      return (
+        <div className="results">
+          <h3 style={{marginTop:0}}>Results</h3>
+          {arr.map((r,i)=>(
+            <div key={i} className="card">
+              <div className="row">
+                <div style={{fontWeight:700}}>{r.generator} • {r.function}</div>
+                <span className={'badge ' + (r.verified?'ok':'bad')}>{r.verified?'Verified':'Not Verified'}</span>
+              </div>
+              <div style={{marginTop:8}}>
+                <div className="muted">ODE</div>
+                <div className="code">{String(r.ode||'')}</div>
+              </div>
+              <div style={{marginTop:8}}>
+                <div className="muted">Solution</div>
+                <div className="code">{String(r.solution||'')}</div>
+              </div>
+              {r.verification && (
+                <div style={{marginTop:8}} className="muted">
+                  Method: {r.verification.method} • Confidence: {(r.verification.confidence*100).toFixed(1)}%
+                </div>
+              )}
+            </div>
+          ))}
+          {arr.length===0 && <div className="muted">No items.</div>}
+        </div>
+      );
+    }
+
+    function SettingsView({settings,setSettings}){
+      const [form,setForm]=useState(settings);
+      const save=()=>{
+        localStorage.setItem('ode_gui_settings', JSON.stringify(form));
+        setSettings(form);
+        alert('Saved. Refreshing…');
+        setTimeout(()=>location.reload(), 200);
+      };
+      return (
+        <>
+          <h2 style={{marginBottom:8}}>Settings</h2>
+          <div className="grid">
+            <div className="group"><label className="label">API Base</label><input className="input" value={form.API_BASE} onChange={e=>setForm({...form, API_BASE:e.target.value})}/></div>
+            <div className="group"><label className="label">API Key (X-API-Key)</label><input className="input" value={form.API_KEY} onChange={e=>setForm({...form, API_KEY:e.target.value})}/></div>
+            <div className="group">
+              <label className="label">WebSocket</label>
+              <select className="select" value={String(form.WS)} onChange={e=>setForm({...form, WS:(e.target.value==='true')})}>
+                <option value="true">true</option><option value="false">false</option>
+              </select>
+            </div>
+          </div>
+          <div style={{marginTop:12,display:'flex',gap:10}}>
+            <button className="btn primary" onClick={save}>Save</button>
+            <button className="btn ghost" onClick={()=>{
+              localStorage.removeItem('ode_gui_settings');
+              alert('Cleared saved settings. Reloading…'); location.reload();
+            }}>Reset</button>
+          </div>
+          <div className="card" style={{marginTop:12}}>
+            <div className="muted"><b>Tip:</b> If your API exposes <code>/config.js</code>, the UI will read it at load:
+              <pre className="code" style={{marginTop:8}}>window.ODE_CONFIG = {"{"} API_BASE: "https://your.app", API_KEY: "dev-key", WS: true {"}"}</pre>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    // mount
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
 </body>
 </html>
