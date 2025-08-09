@@ -1,13 +1,18 @@
 [build]
-builder = "nixpacks"
-nixpacksPlan = "python-3.11"
-nixpacksConfigPath = "nixpacks.toml"
+# Use the Dockerfile created in this project for building the container.
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "python scripts/production_server.py"
+# Define how Railway checks the service health and manages restarts
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "always"
-restartPolicyMaxRetries = 3
-numReplicas = 1
-region = "us-west1"
+
+[deploy.env]
+# These environment variables configure the FastAPI server and GUI.
+ENVIRONMENT = "production"
+ENABLE_WEBSOCKET = "true"
+PUBLIC_READ = "true"
+PORT = "8080"
+GUI_BUNDLE_DIR = "ode_gui_bundle/dist"
