@@ -49,7 +49,7 @@ app.add_middleware(
 )
 PORT = int(os.getenv("PORT", "8080"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-API_KEYS = [k.strip() for k in os.getenv("API_KEY", "dev-key,railway-key").split(",") if k.strip()]
+API_KEYS = [k.strip() for k in os.getenv("API_KEYS", "dev-key,railway-key").split(",") if k.strip()]
 ENVIRONMENT = os.getenv("RAILWAY_ENVIRONMENT", "development")
 ENABLE_WEBSOCKET = os.getenv("ENABLE_WEBSOCKET", "true").lower() == "true"
 PUBLIC_READ = os.getenv("PUBLIC_READ", "false").lower() == "true"
