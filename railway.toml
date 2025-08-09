@@ -1,7 +1,11 @@
 [build]
-builder = "nixpacks"
+buildCommand = """
+    pip install -r requirements.txt && \
+    cd ode_gui_bundle && \
+    npm install && \
+    npm run build && \
+    cd ..
+"""
 
 [deploy]
 startCommand = "python scripts/production_server.py"
-healthcheckPath = "/health"
-numReplicas = 1
